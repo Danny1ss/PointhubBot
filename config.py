@@ -3,13 +3,13 @@ import os
 # ======================
 # BOT CONFIG
 # ======================
-BOT_TOKEN = os.getenv("8611419165:AAHtnbEpdOP9o_sjSw4FZ9jfMgUnVxgwwkI")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # ======================
 # ADMIN CONFIG
 # ======================
 ADMIN_IDS = [
-    8637717184  # حط الايدي بتاعك هنا
+    8637717184
 ]
 
 # ======================
