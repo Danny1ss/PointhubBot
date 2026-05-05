@@ -1,8 +1,8 @@
-from aiogram import Bot, Dispatcher, types
+هخخfrom aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 import os
 
-bot = Bot(token=os.getenv("BOT_TOKEN"))
+bot = Bot(token=os.getenv("8611419165:AAHtnbEpdOP9o_sjSw4FZ9jfMgUnVxgwwkI"))
 dp = Dispatcher(bot)
 
 @dp.message_handler(commands=['start'])
