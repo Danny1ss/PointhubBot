@@ -11,9 +11,10 @@ dp = Dispatcher(bot)
 # ================= STATE =================
 user_state = {}
 withdraw_data = {}
+task_data = {}
 
-# ================= UI =================
-def menu():
+# ================= UI USER =================
+def user_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
         InlineKeyboardButton("💰 حسابي", callback_data="acc"),
@@ -24,20 +25,24 @@ def menu():
         InlineKeyboardButton("💸 سحب", callback_data="withdraw")
     )
     kb.add(
+        InlineKeyboardButton("🧩 مهام", callback_data="tasks"),
+        InlineKeyboardButton("➕ أضف مهمة", callback_data="add_task")
+    )
+    kb.add(
         InlineKeyboardButton("📢 إعلان", callback_data="ad")
     )
     return kb
 
 
-# ================= WITHDRAW UI =================
-def withdraw_menu():
-    kb = InlineKeyboardMarkup()
+# ================= UI ADMIN =================
+def admin_menu():
+    kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("📱 Vodafone Cash", callback_data="w_vodafone"),
+        InlineKeyboardButton("💸 سحوبات", callback_data="admin_w"),
+        InlineKeyboardButton("📢 إعلانات", callback_data="admin_a")
     )
     kb.add(
-        InlineKeyboardButton("💰 TON", callback_data="w_ton"),
-        InlineKeyboardButton("₿ Binance", callback_data="w_binance"),
+        InlineKeyboardButton("🧩 مهام", callback_data="admin_t")
     )
     return kb
 
@@ -48,9 +53,9 @@ async def start(m: types.Message):
     get_user(m.from_user.id)
 
     if m.from_user.id in ADMIN_IDS:
-        return await m.answer("🛠 Admin Panel")
+        return await m.answer("🛠 لوحة الأدمن", reply_markup=admin_menu())
 
-    await m.answer("👋 أهلاً بك", reply_markup=menu())
+    await m.answer("👋 أهلاً بك", reply_markup=user_menu())
 
 
 # ================= CALLBACK =================
@@ -74,7 +79,7 @@ async def cb(c: types.CallbackQuery):
         add_points(c.from_user.id, START_BONUS)
         set_last_bonus(c.from_user.id)
 
-        await c.message.answer(f"🎁 +{START_BONUS} نقاط")
+        await c.message.answer("🎁 تم إضافة المكافأة")
 
     elif c.data == "ref":
         link = f"https://t.me/{(await bot.get_me()).username}?start={c.from_user.id}"
@@ -83,21 +88,25 @@ async def cb(c: types.CallbackQuery):
             f"🎁 لكل إحالة +{REFERRAL_BONUS}"
         )
 
-    elif c.data == "ad":
-        await c.message.answer(
-            f"📢 اكتب إعلانك\n"
-            f"💰 التكلفة: {AD_COST}"
-        )
-
-    # ===== WITHDRAW FLOW =====
     elif c.data == "withdraw":
-        await c.message.answer("💸 اختر طريقة السحب:", reply_markup=withdraw_menu())
+        await c.message.answer("💸 اختر طريقة السحب")
 
-    elif c.data.startswith("w_"):
-        method = c.data.split("_")[1]
-        user_state[c.from_user.id] = method
+    # 🧩 TASKS
+    elif c.data == "tasks":
+        tasks = get_tasks()
+        if not tasks:
+            return await c.message.answer("❌ لا توجد مهام حالياً")
 
-        await c.message.answer("📥 اكتب رقمك أو عنوان المحفظة:")
+        text = "🧩 المهام المتاحة:\n\n"
+        for t in tasks:
+            text += f"📌 {t[1]} (+{t[2]} نقاط)\n"
+
+        await c.message.answer(text)
+
+    # ➕ ADD TASK
+    elif c.data == "add_task":
+        user_state[c.from_user.id] = "task"
+        await c.message.answer("✍️ اكتب المهمة بالشكل:\nالرابط | النقاط")
 
     # ===== ADMIN =====
     if c.from_user.id not in ADMIN_IDS:
@@ -107,16 +116,18 @@ async def cb(c: types.CallbackQuery):
         data = get_withdraws()
         for w in data:
             await c.message.answer(
-                f"💸 ID:{w[0]} | {w[2]}$ | {w[3]}\n"
+                f"💸 {w[0]} | {w[2]}$ | {w[3]}\n"
                 f"/ok_{w[0]} /no_{w[0]}"
             )
+
+    elif c.data == "admin_t":
+        await c.message.answer("🧩 المهام تحت الإدارة")
 
 
 # ================= TEXT =================
 @dp.message_handler()
 async def text(m: types.Message):
     u = get_user(m.from_user.id)
-
     uid = m.from_user.id
 
     # ===== ADS =====
@@ -124,59 +135,34 @@ async def text(m: types.Message):
         if u[1] >= AD_COST:
             add_points(uid, -AD_COST)
             create_ad(uid, m.text)
-            return await m.answer("📢 تم إرسال الإعلان")
+            return await m.answer("📢 تم نشر الإعلان")
 
-    # ===== WITHDRAW INPUT =====
-    if uid in user_state:
-        method = user_state[uid]
-        address = m.text
+    # ===== WITHDRAW FIX =====
+    if " " in m.text:
+        method, address = m.text.split(" ", 1)
+
+        if u[1] < MIN_WITHDRAW:
+            return await m.answer(
+                "❌ الحد الأدنى للسحب 100 نقطة\n"
+                f"💰 نقاطك الحالية: {u[1]}"
+            )
 
         amount = round(u[1] * 0.013, 2)
 
-        withdraw_data[uid] = {
-            "method": method,
-            "address": address,
-            "amount": amount
-        }
+        create_withdraw(uid, amount, method, address)
 
-        kb = InlineKeyboardMarkup()
-        kb.add(
-            InlineKeyboardButton("✔ تأكيد", callback_data="confirm_w"),
-            InlineKeyboardButton("❌ إلغاء", callback_data="cancel_w")
-        )
+        return await m.answer("✅ تم إرسال طلب السحب")
 
-        await m.answer(
-            f"💸 تأكيد السحب:\n"
-            f"📌 الطريقة: {method}\n"
-            f"📌 البيانات: {address}\n"
-            f"💰 المبلغ: {amount}$",
-            reply_markup=kb
-        )
+    # ===== ADD TASK FLOW =====
+    if uid in user_state and user_state[uid] == "task":
+        try:
+            link, points = m.text.split("|")
+            add_task(link.strip(), int(points))
+            user_state.pop(uid)
 
-        return
-
-
-# ================= CONFIRM WITHDRAW =================
-@dp.callback_query_handler(lambda c: c.data in ["confirm_w", "cancel_w"])
-async def confirm(c: types.CallbackQuery):
-
-    uid = c.from_user.id
-
-    if c.data == "cancel_w":
-        user_state.pop(uid, None)
-        withdraw_data.pop(uid, None)
-        return await c.message.answer("❌ تم الإلغاء")
-
-    data = withdraw_data.get(uid)
-    if not data:
-        return await c.message.answer("❌ لا يوجد طلب")
-
-    create_withdraw(uid, data["amount"], data["method"], data["address"])
-
-    user_state.pop(uid, None)
-    withdraw_data.pop(uid, None)
-
-    await c.message.answer("✅ تم إرسال الطلب للإدارة")
+            return await m.answer("✅ تم إضافة المهمة")
+        except:
+            return await m.answer("❌ الصيغة غلط: الرابط | النقاط")
 
 
 # ================= RUN =================
