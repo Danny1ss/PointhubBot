@@ -1,140 +1,174 @@
-import logging
+import time
 from aiogram import Bot, Dispatcher, types, executor
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import *
 from database import *
 
-logging.basicConfig(level=logging.INFO)
-
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN missing")
-
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(BOT_TOKEN)
 dp = Dispatcher(bot)
 
-# ======================
-# KEYBOARD
-# ======================
-menu = ReplyKeyboardMarkup(resize_keyboard=True)
-menu.add(
-    KeyboardButton("💰 حسابي"),
-    KeyboardButton("👥 إحالة")
-)
-menu.add(
-    KeyboardButton("🎁 مكافأة"),
-    KeyboardButton("💸 سحب")
-)
+# ================= UI =================
+def menu():
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("💰 حسابي", callback_data="acc"),
+        InlineKeyboardButton("🎁 مكافأة", callback_data="bonus")
+    )
+    kb.add(
+        InlineKeyboardButton("👥 إحالة", callback_data="ref"),
+        InlineKeyboardButton("💸 سحب", callback_data="withdraw")
+    )
+    kb.add(
+        InlineKeyboardButton("📢 إعلان", callback_data="ad")
+    )
+    return kb
 
-# ======================
-# START
-# ======================
+
+# ================= START =================
 @dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    user_id = message.from_user.id
-    args = message.get_args()
+async def start(m: types.Message):
 
-    inviter = int(args) if args.isdigit() else None
+    # اشتراك إجباري
+    try:
+        member = await bot.get_chat_member(CHANNEL.replace("https://t.me/", "@"), m.from_user.id)
+        if member.status not in ["member", "creator", "administrator"]:
+            return await m.answer(f"اشترك أولاً:\n{CHANNEL}")
+    except:
+        pass
 
-    user = get_user(user_id)
+    get_user(m.from_user.id)
+    await m.answer("👋 أهلاً بك في النظام", reply_markup=menu())
 
-    if inviter and inviter != user_id:
-        add_points(inviter, REFERRAL_BONUS)
-        add_referral(inviter)
 
-    await message.answer(
-        f"👋 أهلاً {message.from_user.first_name}\n"
-        f"💰 نقاطك: {user[1]}\n"
-        f"💵 = {round(user[1]*POINTS_TO_USD, 2)}$",
-        reply_markup=menu
-    )
+# ================= CALLBACK =================
+@dp.callback_query_handler()
+async def cb(c: types.CallbackQuery):
+    u = get_user(c.from_user.id)
 
-# ======================
-@dp.message_handler(lambda m: m.text == "💰 حسابي")
-async def account(message: types.Message):
-    u = get_user(message.from_user.id)
+    if c.data == "acc":
+        await c.message.answer(f"💰 نقاطك: {u[1]}")
 
-    await message.answer(
-        f"💰 نقاطك: {u[1]}\n"
-        f"👥 إحالاتك: {u[3]}\n"
-        f"💵 رصيدك: {round(u[1]*POINTS_TO_USD, 2)}$"
-    )
+    elif c.data == "ref":
+        link = f"https://t.me/{(await bot.get_me()).username}?start={c.from_user.id}"
+        await c.message.answer(link)
 
-# ======================
-@dp.message_handler(lambda m: m.text == "👥 إحالة")
-async def ref(message: types.Message):
-    link = f"https://t.me/{(await bot.get_me()).username}?start={message.from_user.id}"
+    elif c.data == "bonus":
+        now = int(time.time())
+        if now - u[3] < BONUS_COOLDOWN:
+            return await c.message.answer("⏳ انتظر 24 ساعة")
 
-    await message.answer(
-        f"👥 رابط الإحالة:\n{link}\n\n🎁 مكافأة: {REFERRAL_BONUS} نقاط"
-    )
+        add_points(c.from_user.id, START_BONUS)
+        await c.message.answer("🎁 تمت الإضافة")
 
-# ======================
-@dp.message_handler(lambda m: m.text == "🎁 مكافأة")
-async def bonus(message: types.Message):
-    add_points(message.from_user.id, START_BONUS)
-    u = get_user(message.from_user.id)
+    elif c.data == "withdraw":
+        await c.message.answer("اكتب: method + address")
 
-    await message.answer(f"🎁 +{START_BONUS}\n💰 {u[1]}")
+    elif c.data == "ad":
+        await c.message.answer("اكتب إعلانك (خصم نقاط تلقائي)")
 
-# ======================
-@dp.message_handler(lambda m: m.text == "💸 سحب")
-async def withdraw(message: types.Message):
-    u = get_user(message.from_user.id)
 
-    if u[1] < MIN_WITHDRAW_POINTS:
-        return await message.answer("❌ أقل سحب 100 نقطة")
+# ================= TEXT =================
+@dp.message_handler()
+async def text(m: types.Message):
+    u = get_user(m.from_user.id)
 
-    amount = round(u[1] * POINTS_TO_USD, 2)
-    create_withdraw(message.from_user.id, amount)
+    # AD SYSTEM
+    if len(m.text) > 5:
+        if u[1] >= AD_COST:
+            add_points(m.from_user.id, -AD_COST)
+            create_ad(m.from_user.id, m.text)
+            return await m.answer("📢 تم إرسال الإعلان")
 
-    await message.answer(f"✅ تم طلب سحب {amount}$")
+    # WITHDRAW
+    try:
+        method, address = m.text.split(maxsplit=1)
+    except:
+        return
 
-# ======================
-# ADMIN PANEL
-# ======================
+    if u[1] < MIN_WITHDRAW:
+        return await m.answer("❌ الحد الأدنى 100")
+
+    amount = round(u[1] * 0.013, 2)
+
+    create_withdraw(m.from_user.id, amount, method, address)
+
+    await m.answer("✅ تم إرسال طلب السحب")
+
+
+# ================= ADMIN =================
 @dp.message_handler(commands=["admin"])
-async def admin(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
+async def admin(m: types.Message):
+    if m.from_user.id not in ADMIN_IDS:
         return
 
-    await message.answer(
-        "🛠 Admin Panel:\n"
-        "/users\n/withdraws\n/give"
-    )
+    await m.answer("🛠 Admin:\n/withdraws\n/ads")
 
-# USERS
-@dp.message_handler(commands=["users"])
-async def users(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return
 
-    await message.answer("📊 النظام يعمل")
-
-# WITHDRAWS
 @dp.message_handler(commands=["withdraws"])
-async def withdraws(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
+async def withdraws(m: types.Message):
+    if m.from_user.id not in ADMIN_IDS:
         return
 
     data = get_pending_withdraws()
-    await message.answer(f"📤 طلبات: {len(data)}")
 
-# GIVE POINTS
-@dp.message_handler(commands=["give"])
-async def give(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
+    for w in data:
+        await m.answer(
+            f"💸 ID:{w[0]} | {w[1]}$ | {w[3]}\n"
+            f"🔘 /approve_{w[0]} /reject_{w[0]}"
+        )
+
+
+@dp.message_handler(commands=["ads"])
+async def ads(m: types.Message):
+    if m.from_user.id not in ADMIN_IDS:
         return
 
-    try:
-        _, uid, pts = message.text.split()
-        add_points(int(uid), int(pts))
-        await message.answer("✅ تم الإضافة")
-    except:
-        await message.answer("❌ /give user_id points")
+    data = get_ads()
 
-# ======================
-# RUN
-# ======================
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    for a in data:
+        await m.answer(
+            f"📢 Ad ID:{a[0]}\n{a[2]}\n"
+            f"🔘 /ad_ok_{a[0]} /ad_no_{a[0]}"
+        )
+
+
+# ================= ADMIN ACTIONS =================
+@dp.message_handler(lambda m: m.text.startswith("/approve_"))
+async def approve_w(m: types.Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return
+    wid = int(m.text.split("_")[1])
+    update_withdraw(wid, "approved")
+    await m.answer("✅ Approved")
+
+
+@dp.message_handler(lambda m: m.text.startswith("/reject_"))
+async def reject_w(m: types.Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return
+    wid = int(m.text.split("_")[1])
+    update_withdraw(wid, "rejected")
+    await m.answer("❌ Rejected")
+
+
+@dp.message_handler(lambda m: m.text.startswith("/ad_ok_"))
+async def ad_ok(m: types.Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return
+    aid = int(m.text.split("_")[2])
+    update_ad(aid, "approved")
+    await m.answer("📢 Ad Approved")
+
+
+@dp.message_handler(lambda m: m.text.startswith("/ad_no_"))
+async def ad_no(m: types.Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return
+    aid = int(m.text.split("_")[2])
+    update_ad(aid, "rejected")
+    await m.answer("🚫 Ad Rejected")
+
+
+# ================= RUN =================
+executor.start_polling(dp)
