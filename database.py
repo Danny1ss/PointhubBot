@@ -3,106 +3,60 @@ import sqlite3
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# ======================
-# USERS TABLE
-# ======================
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     points INTEGER DEFAULT 0,
     vip INTEGER DEFAULT 0,
-    referrals INTEGER DEFAULT 0
+    referrals INTEGER DEFAULT 0,
+    last_daily TEXT
 )
 """)
 
-# ======================
-# TRANSACTIONS TABLE
-# ======================
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS transactions (
+CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
-    type TEXT,
     amount INTEGER,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-# ======================
-# SHOP TABLE
-# ======================
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS shop (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    price INTEGER
+    status TEXT DEFAULT 'pending'
 )
 """)
 
 conn.commit()
 
 
-# ======================
-# USER FUNCTIONS
-# ======================
 def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    data = cursor.fetchone()
+    user = cursor.fetchone()
 
-    if not data:
+    if not user:
         cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
         return get_user(user_id)
 
-    return data
+    return user
 
 
-def update_points(user_id, amount):
-    cursor.execute(
-        "UPDATE users SET points = points + ? WHERE user_id=?",
-        (amount, user_id)
-    )
+def add_points(user_id, amount):
+    cursor.execute("UPDATE users SET points = points + ? WHERE user_id=?", (amount, user_id))
     conn.commit()
 
 
 def set_vip(user_id, level):
-    cursor.execute(
-        "UPDATE users SET vip=? WHERE user_id=?",
-        (level, user_id)
-    )
+    cursor.execute("UPDATE users SET vip=? WHERE user_id=?", (level, user_id))
     conn.commit()
 
 
 def add_referral(user_id):
-    cursor.execute(
-        "UPDATE users SET referrals = referrals + 1 WHERE user_id=?",
-        (user_id,)
-    )
+    cursor.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id=?", (user_id,))
     conn.commit()
 
 
-# ======================
-# TRANSACTIONS
-# ======================
-def add_transaction(user_id, type_, amount):
-    cursor.execute(
-        "INSERT INTO transactions (user_id, type, amount) VALUES (?, ?, ?)",
-        (user_id, type_, amount)
-    )
+def set_daily(user_id, date):
+    cursor.execute("UPDATE users SET last_daily=? WHERE user_id=?", (date, user_id))
     conn.commit()
 
 
-# ======================
-# SHOP SYSTEM
-# ======================
-def add_item(name, price):
-    cursor.execute(
-        "INSERT INTO shop (name, price) VALUES (?, ?)",
-        (name, price)
-    )
+def create_withdraw(user_id, amount):
+    cursor.execute("INSERT INTO withdrawals (user_id, amount) VALUES (?, ?)", (user_id, amount))
     conn.commit()
-
-
-def get_items():
-    cursor.execute("SELECT * FROM shop")
-    return cursor.fetchall()
