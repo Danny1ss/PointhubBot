@@ -22,6 +22,15 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # ======================
+# MAIN MENU
+# ======================
+def main_menu():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add("💰 Points", "🎁 Bonus")
+    keyboard.add("👑 VIP", "📊 Stats")
+    return keyboard
+
+# ======================
 # SAFE USER
 # ======================
 def ensure_user(user_id: int):
@@ -39,48 +48,54 @@ async def start(message: types.Message):
     user = ensure_user(message.from_user.id)
 
     if not user:
-        return await message.answer("❌ Error creating account")
+        return await message.answer("❌ Error")
 
     await message.answer(
         f"👋 Welcome {message.from_user.first_name}\n"
-        f"💰 Points: {user[1]}"
+        f"💰 Points: {user[1]}",
+        reply_markup=main_menu()
     )
 
 # ======================
-# POINTS
+# BUTTON: POINTS
 # ======================
-@dp.message_handler(commands=["points"])
-async def points(message: types.Message):
+@dp.message_handler(lambda message: message.text == "💰 Points")
+async def points_btn(message: types.Message):
     user = ensure_user(message.from_user.id)
-
-    if not user:
-        return await message.answer("❌ Error")
-
     await message.answer(f"💰 Points: {user[1]}")
 
 # ======================
-# BONUS
+# BUTTON: BONUS
 # ======================
-@dp.message_handler(commands=["bonus"])
-async def bonus(message: types.Message):
+@dp.message_handler(lambda message: message.text == "🎁 Bonus")
+async def bonus_btn(message: types.Message):
     user_id = message.from_user.id
 
     update_points(user_id, START_BONUS)
     user = ensure_user(user_id)
 
-    if user:
-        await message.answer(
-            f"🎁 +{START_BONUS} points\n"
-            f"💰 Total: {user[1]}"
-        )
+    await message.answer(
+        f"🎁 +{START_BONUS} points\n"
+        f"💰 Total: {user[1]}"
+    )
 
 # ======================
-# HELP
+# BUTTON: VIP
 # ======================
-@dp.message_handler(commands=["help"])
-async def help_cmd(message: types.Message):
+@dp.message_handler(lambda message: message.text == "👑 VIP")
+async def vip(message: types.Message):
+    await message.answer("👑 VIP system coming soon...")
+
+# ======================
+# BUTTON: STATS
+# ======================
+@dp.message_handler(lambda message: message.text == "📊 Stats")
+async def stats(message: types.Message):
+    user = ensure_user(message.from_user.id)
+
     await message.answer(
-        "/start\n/points\n/bonus"
+        f"📊 Your Stats:\n"
+        f"💰 Points: {user[1]}"
     )
 
 # ======================
@@ -88,7 +103,7 @@ async def help_cmd(message: types.Message):
 # ======================
 @dp.message_handler()
 async def fallback(message: types.Message):
-    await message.answer("Use /help")
+    await message.answer("Use buttons 👇", reply_markup=main_menu())
 
 # ======================
 # RUN
