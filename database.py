@@ -10,17 +10,19 @@ CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     points INTEGER DEFAULT 0,
     referrals INTEGER DEFAULT 0,
-    last_bonus INTEGER DEFAULT 0
+    last_bonus INTEGER DEFAULT 0,
+    vip INTEGER DEFAULT 0
 )
 """)
 
-# ADS
+# TASKS
 cur.execute("""
-CREATE TABLE IF NOT EXISTS ads (
+CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    text TEXT,
-    status TEXT DEFAULT 'pending'
+    owner_id INTEGER,
+    link TEXT,
+    reward INTEGER,
+    status TEXT DEFAULT 'active'
 )
 """)
 
@@ -38,44 +40,40 @@ CREATE TABLE IF NOT EXISTS withdraws (
 
 conn.commit()
 
-
 # ================= USERS =================
 def get_user(uid):
     cur.execute("SELECT * FROM users WHERE user_id=?", (uid,))
     u = cur.fetchone()
-
     if not u:
         cur.execute("INSERT INTO users (user_id) VALUES (?)", (uid,))
         conn.commit()
-        return (uid, 0, 0, 0)
-
+        return (uid, 0, 0, 0, 0)
     return u
 
 
-def add_points(uid, p):
-    cur.execute("UPDATE users SET points = points + ? WHERE user_id=?", (p, uid))
+def add_points(uid, amount):
+    cur.execute("UPDATE users SET points = points + ? WHERE user_id=?", (amount, uid))
     conn.commit()
 
 
-def set_last_bonus(uid):
+def set_vip(uid, level):
+    cur.execute("UPDATE users SET vip=? WHERE user_id=?", (level, uid))
+    conn.commit()
+
+
+def set_bonus(uid):
     cur.execute("UPDATE users SET last_bonus=? WHERE user_id=?", (int(time.time()), uid))
     conn.commit()
 
-
-# ================= ADS =================
-def create_ad(uid, text):
-    cur.execute("INSERT INTO ads (user_id, text) VALUES (?, ?)", (uid, text))
+# ================= TASKS =================
+def add_task(owner, link, reward):
+    cur.execute("INSERT INTO tasks (owner_id, link, reward) VALUES (?, ?, ?)", (owner, link, reward))
     conn.commit()
 
 
-def get_ads():
-    cur.execute("SELECT * FROM ads WHERE status='pending'")
+def get_tasks():
+    cur.execute("SELECT * FROM tasks WHERE status='active'")
     return cur.fetchall()
-
-
-def update_ad(aid, status):
-    cur.execute("UPDATE ads SET status=? WHERE id=?", (status, aid))
-    conn.commit()
 
 
 # ================= WITHDRAW =================
