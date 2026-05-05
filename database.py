@@ -28,6 +28,17 @@ CREATE TABLE IF NOT EXISTS transactions (
 )
 """)
 
+# ======================
+# SHOP TABLE
+# ======================
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS shop (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    price INTEGER
+)
+""")
+
 conn.commit()
 
 
@@ -41,7 +52,7 @@ def get_user(user_id):
     if not data:
         cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
-        return (user_id, 0, 0, 0)
+        return get_user(user_id)
 
     return data
 
@@ -50,14 +61,6 @@ def update_points(user_id, amount):
     cursor.execute(
         "UPDATE users SET points = points + ? WHERE user_id=?",
         (amount, user_id)
-    )
-    conn.commit()
-
-
-def add_transaction(user_id, type_, amount):
-    cursor.execute(
-        "INSERT INTO transactions (user_id, type, amount) VALUES (?, ?, ?)",
-        (user_id, type_, amount)
     )
     conn.commit()
 
@@ -76,3 +79,30 @@ def add_referral(user_id):
         (user_id,)
     )
     conn.commit()
+
+
+# ======================
+# TRANSACTIONS
+# ======================
+def add_transaction(user_id, type_, amount):
+    cursor.execute(
+        "INSERT INTO transactions (user_id, type, amount) VALUES (?, ?, ?)",
+        (user_id, type_, amount)
+    )
+    conn.commit()
+
+
+# ======================
+# SHOP SYSTEM
+# ======================
+def add_item(name, price):
+    cursor.execute(
+        "INSERT INTO shop (name, price) VALUES (?, ?)",
+        (name, price)
+    )
+    conn.commit()
+
+
+def get_items():
+    cursor.execute("SELECT * FROM shop")
+    return cursor.fetchall()
