@@ -1,18 +1,13 @@
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 ADMIN_IDS = [8637717184]
 
 START_BONUS = 10
-REFERRAL_BONUS = 10
+REFERRAL_BONUS = 15
 
-MIN_WITHDRAW_POINTS = 100
-POINTS_TO_USD = 1.30 / 100
+MIN_WITHDRAW = 100
+AD_COST = 50
 
-VIP_MULTIPLIER = {
-    0: 1.0,
-    1: 1.2,
-    2: 1.5,
-    3: 2.0
-}
+CHANNEL = "https://t.me/your_channel"
+BONUS_COOLDOWN = 86400  # 24h
