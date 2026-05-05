@@ -9,5 +9,5 @@ REFERRAL_BONUS = 15
 MIN_WITHDRAW = 100
 AD_COST = 50
 
-CHANNEL = "https://t.me/your_channel"
 BONUS_COOLDOWN = 86400  # 24h
+CHANNEL = "https://t.me/your_channel"
