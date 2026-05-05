@@ -1,6 +1,4 @@
 import logging
-from datetime import datetime
-
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
@@ -19,99 +17,121 @@ dp = Dispatcher(bot)
 # KEYBOARD
 # ======================
 menu = ReplyKeyboardMarkup(resize_keyboard=True)
-menu.add("💰 نقاطي", "🎁 مكافأة يومية")
-menu.add("👑 VIP", "🔗 دعوة")
-menu.add("💸 سحب أرباح")
-
-admin_menu = ReplyKeyboardMarkup(resize_keyboard=True)
-admin_menu.add("📊 احصائيات", "💎 اعطاء VIP")
+menu.add(
+    KeyboardButton("💰 حسابي"),
+    KeyboardButton("👥 إحالة")
+)
+menu.add(
+    KeyboardButton("🎁 مكافأة"),
+    KeyboardButton("💸 سحب")
+)
 
 # ======================
 # START
 # ======================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    user = get_user(message.from_user.id)
+    user_id = message.from_user.id
+    args = message.get_args()
+
+    inviter = int(args) if args.isdigit() else None
+
+    user = get_user(user_id)
+
+    if inviter and inviter != user_id:
+        add_points(inviter, REFERRAL_BONUS)
+        add_referral(inviter)
 
     await message.answer(
         f"👋 أهلاً {message.from_user.first_name}\n"
-        f"💰 نقاطك: {user[1]}",
+        f"💰 نقاطك: {user[1]}\n"
+        f"💵 = {round(user[1]*POINTS_TO_USD, 2)}$",
         reply_markup=menu
     )
 
 # ======================
-# POINTS
-# ======================
-@dp.message_handler(lambda m: m.text == "💰 نقاطي")
-async def points(message: types.Message):
-    user = get_user(message.from_user.id)
+@dp.message_handler(lambda m: m.text == "💰 حسابي")
+async def account(message: types.Message):
+    u = get_user(message.from_user.id)
 
     await message.answer(
-        f"💰 نقاطك: {user[1]}\n"
-        f"👑 VIP: {VIP_LEVELS[user[2]]['name']}"
+        f"💰 نقاطك: {u[1]}\n"
+        f"👥 إحالاتك: {u[3]}\n"
+        f"💵 رصيدك: {round(u[1]*POINTS_TO_USD, 2)}$"
     )
 
 # ======================
-# DAILY BONUS
-# ======================
-@dp.message_handler(lambda m: m.text == "🎁 مكافأة يومية")
-async def daily(message: types.Message):
-    user = get_user(message.from_user.id)
-    today = str(datetime.today().date())
-
-    if user[4] == today:
-        return await message.answer("❌ استلمت النهارده بالفعل")
-
-    bonus = DAILY_BONUS * VIP_LEVELS[user[2]]["bonus"]
-
-    add_points(message.from_user.id, int(bonus))
-    set_daily(message.from_user.id, today)
-
-    await message.answer(f"🎁 تم إضافة {int(bonus)} نقطة")
-
-# ======================
-# REFERRAL
-# ======================
-@dp.message_handler(lambda m: m.text == "🔗 دعوة")
+@dp.message_handler(lambda m: m.text == "👥 إحالة")
 async def ref(message: types.Message):
     link = f"https://t.me/{(await bot.get_me()).username}?start={message.from_user.id}"
 
-    await message.answer(f"🔗 رابطك:\n{link}")
-
-# ======================
-# VIP
-# ======================
-@dp.message_handler(lambda m: m.text == "👑 VIP")
-async def vip(message: types.Message):
     await message.answer(
-        "👑 VIP Levels:\n"
-        "VIP1 = x1.2\nVIP2 = x1.5\nVIP3 = x2"
+        f"👥 رابط الإحالة:\n{link}\n\n🎁 مكافأة: {REFERRAL_BONUS} نقاط"
     )
 
 # ======================
-# WITHDRAW
+@dp.message_handler(lambda m: m.text == "🎁 مكافأة")
+async def bonus(message: types.Message):
+    add_points(message.from_user.id, START_BONUS)
+    u = get_user(message.from_user.id)
+
+    await message.answer(f"🎁 +{START_BONUS}\n💰 {u[1]}")
+
 # ======================
-@dp.message_handler(lambda m: m.text == "💸 سحب أرباح")
+@dp.message_handler(lambda m: m.text == "💸 سحب")
 async def withdraw(message: types.Message):
-    user = get_user(message.from_user.id)
+    u = get_user(message.from_user.id)
 
-    if user[1] < 50:
-        return await message.answer("❌ الحد الأدنى للسحب 50 نقطة")
+    if u[1] < MIN_WITHDRAW_POINTS:
+        return await message.answer("❌ أقل سحب 100 نقطة")
 
-    create_withdraw(message.from_user.id, 50)
-    add_points(message.from_user.id, -50)
+    amount = round(u[1] * POINTS_TO_USD, 2)
+    create_withdraw(message.from_user.id, amount)
 
-    await message.answer("✅ تم إرسال طلب السحب")
+    await message.answer(f"✅ تم طلب سحب {amount}$")
 
 # ======================
-# ADMIN
+# ADMIN PANEL
 # ======================
-@dp.message_handler(lambda m: m.from_user.id in ADMIN_IDS and m.text == "📊 احصائيات")
-async def stats(message: types.Message):
-    cursor.execute("SELECT COUNT(*) FROM users")
-    count = cursor.fetchone()[0]
+@dp.message_handler(commands=["admin"])
+async def admin(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
 
-    await message.answer(f"👥 المستخدمين: {count}")
+    await message.answer(
+        "🛠 Admin Panel:\n"
+        "/users\n/withdraws\n/give"
+    )
+
+# USERS
+@dp.message_handler(commands=["users"])
+async def users(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer("📊 النظام يعمل")
+
+# WITHDRAWS
+@dp.message_handler(commands=["withdraws"])
+async def withdraws(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = get_pending_withdraws()
+    await message.answer(f"📤 طلبات: {len(data)}")
+
+# GIVE POINTS
+@dp.message_handler(commands=["give"])
+async def give(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        _, uid, pts = message.text.split()
+        add_points(int(uid), int(pts))
+        await message.answer("✅ تم الإضافة")
+    except:
+        await message.answer("❌ /give user_id points")
 
 # ======================
 # RUN
