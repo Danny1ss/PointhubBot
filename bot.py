@@ -1,162 +1,100 @@
-import os
 import logging
-from aiogram import Bot, Dispatcher, executor, types
-from database import get_user, update_points, add_transaction, set_vip, add_referral
+import os
+from aiogram import Bot, Dispatcher, types, executor
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+
+from config import BOT_TOKEN, START_BONUS
+from database import get_user, update_points
 
 # ======================
-# CONFIG
-# ======================
-TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-
-# ======================
-# INIT
+# LOGGING
 # ======================
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=TOKEN)
+# ======================
+# BOT INIT
+# ======================
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
-
+dp.middleware.setup(LoggingMiddleware())
 
 # ======================
-# START
+# SAFE USER GET OR CREATE
+# ======================
+def ensure_user(user_id: int):
+    try:
+        return get_user(user_id)
+    except Exception as e:
+        logging.error(f"DB Error: {e}")
+        return None
+
+# ======================
+# START COMMAND
 # ======================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    user = get_user(message.from_user.id)
+    user_id = message.from_user.id
+    user = ensure_user(user_id)
+
+    if not user:
+        await message.answer("❌ حدث خطأ في إنشاء الحساب، حاول لاحقًا.")
+        return
 
     await message.answer(
         f"👋 أهلاً {message.from_user.first_name}\n\n"
-        f"💰 نقاطك: {user[1]}\n"
-        f"⭐ VIP: {user[2]}\n"
-        f"👥 إحالات: {user[3]}\n\n"
-        f"📌 /tasks المهام\n"
-        f"📌 /balance الرصيد\n"
-        f"📌 /withdraw السحب"
+        f"🎯 تم تسجيلك بنجاح في النظام\n"
+        f"💰 نقاطك: {user[1]}"
     )
 
+# ======================
+# POINTS COMMAND
+# ======================
+@dp.message_handler(commands=["points"])
+async def points(message: types.Message):
+    user = ensure_user(message.from_user.id)
+
+    if not user:
+        return await message.answer("❌ خطأ في جلب البيانات")
+
+    await message.answer(f"💰 نقاطك الحالية: {user[1]}")
 
 # ======================
-# BALANCE
+# BONUS COMMAND (TEST)
 # ======================
-@dp.message_handler(commands=["balance"])
-async def balance(message: types.Message):
-    user = get_user(message.from_user.id)
-
-    await message.answer(
-        f"💰 رصيدك:\n\n"
-        f"Points: {user[1]}\n"
-        f"VIP: {user[2]}\n"
-        f"Referrals: {user[3]}"
-    )
-
-
-# ======================
-# TASKS
-# ======================
-@dp.message_handler(commands=["tasks"])
-async def tasks(message: types.Message):
-    await message.answer(
-        "📌 مهام يومية:\n\n"
-        "1) استخدم /daily (+10 نقاط)\n"
-        "2) شارك البوت (+5 نقاط)"
-    )
-
-
-@dp.message_handler(commands=["daily"])
-async def daily(message: types.Message):
-    update_points(message.from_user.id, 10)
-    add_transaction(message.from_user.id, "daily", 10)
-
-    await message.answer("✅ حصلت على 10 نقاط")
-
-
-# ======================
-# REFERRAL SYSTEM
-# ======================
-@dp.message_handler(commands=["ref"])
-async def ref(message: types.Message):
+@dp.message_handler(commands=["bonus"])
+async def bonus(message: types.Message):
     user_id = message.from_user.id
 
-    link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"
+    update_points(user_id, START_BONUS)
+    user = ensure_user(user_id)
 
     await message.answer(
-        f"🔗 رابط الإحالة الخاص بك:\n{link}\n\n"
-        f"💰 تربح نقاط لكل شخص يدخل"
+        f"🎁 تم إضافة {START_BONUS} نقطة\n"
+        f"💰 رصيدك الآن: {user[1]}"
     )
 
-
-@dp.message_handler(lambda msg: msg.text and msg.text.startswith("/start "))
-async def referral_handler(message: types.Message):
-    try:
-        ref_id = int(message.text.split()[1])
-
-        if ref_id != message.from_user.id:
-            add_referral(ref_id)
-            update_points(ref_id, 5)
-            add_transaction(ref_id, "referral", 5)
-
-    except:
-        pass
-
-
 # ======================
-# WITHDRAW SYSTEM
+# HELP COMMAND
 # ======================
-@dp.message_handler(commands=["withdraw"])
-async def withdraw(message: types.Message):
-    user = get_user(message.from_user.id)
-
-    if user[1] < 100:
-        return await message.answer("❌ الحد الأدنى للسحب 100 نقطة")
-
+@dp.message_handler(commands=["help"])
+async def help_cmd(message: types.Message):
     await message.answer(
-        "💸 طلب السحب تم استلامه\n"
-        "سيتم مراجعته من الإدارة"
+        "📌 الأوامر المتاحة:\n"
+        "/start - بدء البوت\n"
+        "/points - عرض نقاطك\n"
+        "/bonus - اختبار إضافة نقاط"
     )
 
-    add_transaction(message.from_user.id, "withdraw_request", user[1])
-
+# ======================
+# FALLBACK (أي رسالة غير أوامر)
+# ======================
+@dp.message_handler()
+async def fallback(message: types.Message):
+    await message.answer("🤖 استخدم /help لعرض الأوامر")
 
 # ======================
-# ADMIN PANEL
-# ======================
-@dp.message_handler(commands=["admin"])
-async def admin(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    await message.answer(
-        "🛠 لوحة الأدمن:\n\n"
-        "/addpoints id amount\n"
-        "/setvip id level"
-    )
-
-
-@dp.message_handler(commands=["addpoints"])
-async def addpoints(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    _, uid, amount = message.text.split()
-    update_points(int(uid), int(amount))
-
-    await message.answer("✅ تم إضافة النقاط")
-
-
-@dp.message_handler(commands=["setvip"])
-async def vip(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    _, uid, level = message.text.split()
-    set_vip(int(uid), int(level))
-
-    await message.answer("⭐ تم تحديث VIP")
-
-
-# ======================
-# RUN
+# RUN BOT
 # ======================
 if __name__ == "__main__":
+    logging.info("Bot is starting...")
     executor.start_polling(dp, skip_updates=True)
