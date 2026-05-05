@@ -5,12 +5,14 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [8637717184]
 
 START_BONUS = 10
-REFERRAL_BONUS = 5
-DAILY_BONUS = 3
+REFERRAL_BONUS = 10
 
-VIP_LEVELS = {
-    0: {"name": "Free", "bonus": 1},
-    1: {"name": "VIP 1", "bonus": 1.2},
-    2: {"name": "VIP 2", "bonus": 1.5},
-    3: {"name": "VIP 3", "bonus": 2},
+MIN_WITHDRAW_POINTS = 100
+POINTS_TO_USD = 1.30 / 100
+
+VIP_MULTIPLIER = {
+    0: 1.0,
+    1: 1.2,
+    2: 1.5,
+    3: 2.0
 }
