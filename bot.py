@@ -8,19 +8,29 @@ from database import *
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(bot)
 
+
 # ================= UI =================
 def menu():
-    kb = InlineKeyboardMarkup()
+    kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
         InlineKeyboardButton("💰 حسابي", callback_data="acc"),
-        InlineKeyboardButton("🎁 مكافأة", callback_data="bonus")
+        InlineKeyboardButton("🎁 بونص", callback_data="bonus")
     )
     kb.add(
         InlineKeyboardButton("👥 إحالة", callback_data="ref"),
         InlineKeyboardButton("💸 سحب", callback_data="withdraw")
     )
     kb.add(
-        InlineKeyboardButton("📢 إعلان", callback_data="ad")
+        InlineKeyboardButton("📢 إعلان", callback_data="ad"),
+    )
+    return kb
+
+
+def admin_menu():
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("💸 Withdraw", callback_data="admin_w"),
+        InlineKeyboardButton("📢 Ads", callback_data="admin_a")
     )
     return kb
 
@@ -28,17 +38,12 @@ def menu():
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-
-    # اشتراك إجباري
-    try:
-        member = await bot.get_chat_member(CHANNEL.replace("https://t.me/", "@"), m.from_user.id)
-        if member.status not in ["member", "creator", "administrator"]:
-            return await m.answer(f"اشترك أولاً:\n{CHANNEL}")
-    except:
-        pass
-
     get_user(m.from_user.id)
-    await m.answer("👋 أهلاً بك في النظام", reply_markup=menu())
+
+    if m.from_user.id in ADMIN_IDS:
+        return await m.answer("🛠 Admin Panel", reply_markup=admin_menu())
+
+    await m.answer("👋 أهلاً بك", reply_markup=menu())
 
 
 # ================= CALLBACK =================
@@ -46,26 +51,66 @@ async def start(m: types.Message):
 async def cb(c: types.CallbackQuery):
     u = get_user(c.from_user.id)
 
+    # ===== USER =====
     if c.data == "acc":
-        await c.message.answer(f"💰 نقاطك: {u[1]}")
+        await c.message.answer(
+            f"💰 نقاطك: {u[1]}\n"
+            f"👥 إحالاتك: {u[2]}\n"
+            f"💵 قيمتها: {u[1]*0.013:.2f}$"
+        )
 
-    elif c.data == "ref":
-        link = f"https://t.me/{(await bot.get_me()).username}?start={c.from_user.id}"
-        await c.message.answer(link)
-
+    # 🔥 BONUS 24H SYSTEM
     elif c.data == "bonus":
         now = int(time.time())
+
         if now - u[3] < BONUS_COOLDOWN:
-            return await c.message.answer("⏳ انتظر 24 ساعة")
+            remain = BONUS_COOLDOWN - (now - u[3])
+            return await c.message.answer(f"⏳ انتظر {remain//3600} ساعة")
 
         add_points(c.from_user.id, START_BONUS)
-        await c.message.answer("🎁 تمت الإضافة")
+        set_last_bonus(c.from_user.id)
 
+        await c.message.answer(f"🎁 +{START_BONUS} نقاط")
+
+    # 👥 REF
+    elif c.data == "ref":
+        link = f"https://t.me/{(await bot.get_me()).username}?start={c.from_user.id}"
+        await c.message.answer(
+            f"🔗 رابطك:\n{link}\n"
+            f"🎁 تربح {REFERRAL_BONUS} نقاط لكل إحالة"
+        )
+
+    # 💸 WITHDRAW
     elif c.data == "withdraw":
-        await c.message.answer("اكتب: method + address")
+        await c.message.answer("💸 اكتب: method address")
 
+    # 📢 ADS
     elif c.data == "ad":
-        await c.message.answer("اكتب إعلانك (خصم نقاط تلقائي)")
+        await c.message.answer(
+            f"📢 اكتب إعلانك\n"
+            f"💰 التكلفة: {AD_COST} نقطة"
+        )
+
+    # ===== ADMIN =====
+    if c.from_user.id not in ADMIN_IDS:
+        return
+
+    if c.data == "admin_w":
+        from database import get_withdraws
+        data = get_withdraws()
+        for w in data:
+            await c.message.answer(
+                f"💸 ID:{w[0]} | {w[2]}$ | {w[3]}\n"
+                f"/ok_{w[0]} /no_{w[0]}"
+            )
+
+    elif c.data == "admin_a":
+        ads = get_ads()
+        for a in ads:
+            await c.message.answer(
+                f"📢 {a[2]}\n"
+                f"/adok_{a[0]} /adno_{a[0]}"
+            )
 
 
 # ================= TEXT =================
@@ -73,101 +118,25 @@ async def cb(c: types.CallbackQuery):
 async def text(m: types.Message):
     u = get_user(m.from_user.id)
 
-    # AD SYSTEM
-    if len(m.text) > 5:
+    # 📢 ADS
+    if len(m.text) > 5 and not m.text.startswith("/"):
         if u[1] >= AD_COST:
             add_points(m.from_user.id, -AD_COST)
             create_ad(m.from_user.id, m.text)
-            return await m.answer("📢 تم إرسال الإعلان")
+            return await m.answer("📢 تم نشر الإعلان")
 
-    # WITHDRAW
-    try:
-        method, address = m.text.split(maxsplit=1)
-    except:
-        return
+    # 💸 WITHDRAW FIX
+    if " " in m.text:
+        method, address = m.text.split(" ", 1)
 
-    if u[1] < MIN_WITHDRAW:
-        return await m.answer("❌ الحد الأدنى 100")
+        if u[1] < MIN_WITHDRAW:
+            return await m.answer("❌ الحد الأدنى 100")
 
-    amount = round(u[1] * 0.013, 2)
+        amount = round(u[1] * 0.013, 2)
 
-    create_withdraw(m.from_user.id, amount, method, address)
+        create_withdraw(m.from_user.id, amount, method, address)
 
-    await m.answer("✅ تم إرسال طلب السحب")
-
-
-# ================= ADMIN =================
-@dp.message_handler(commands=["admin"])
-async def admin(m: types.Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return
-
-    await m.answer("🛠 Admin:\n/withdraws\n/ads")
-
-
-@dp.message_handler(commands=["withdraws"])
-async def withdraws(m: types.Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return
-
-    data = get_pending_withdraws()
-
-    for w in data:
-        await m.answer(
-            f"💸 ID:{w[0]} | {w[1]}$ | {w[3]}\n"
-            f"🔘 /approve_{w[0]} /reject_{w[0]}"
-        )
-
-
-@dp.message_handler(commands=["ads"])
-async def ads(m: types.Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return
-
-    data = get_ads()
-
-    for a in data:
-        await m.answer(
-            f"📢 Ad ID:{a[0]}\n{a[2]}\n"
-            f"🔘 /ad_ok_{a[0]} /ad_no_{a[0]}"
-        )
-
-
-# ================= ADMIN ACTIONS =================
-@dp.message_handler(lambda m: m.text.startswith("/approve_"))
-async def approve_w(m: types.Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return
-    wid = int(m.text.split("_")[1])
-    update_withdraw(wid, "approved")
-    await m.answer("✅ Approved")
-
-
-@dp.message_handler(lambda m: m.text.startswith("/reject_"))
-async def reject_w(m: types.Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return
-    wid = int(m.text.split("_")[1])
-    update_withdraw(wid, "rejected")
-    await m.answer("❌ Rejected")
-
-
-@dp.message_handler(lambda m: m.text.startswith("/ad_ok_"))
-async def ad_ok(m: types.Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return
-    aid = int(m.text.split("_")[2])
-    update_ad(aid, "approved")
-    await m.answer("📢 Ad Approved")
-
-
-@dp.message_handler(lambda m: m.text.startswith("/ad_no_"))
-async def ad_no(m: types.Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return
-    aid = int(m.text.split("_")[2])
-    update_ad(aid, "rejected")
-    await m.answer("🚫 Ad Rejected")
+        await m.answer("✅ تم إرسال السحب")
 
 
 # ================= RUN =================
