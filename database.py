@@ -1,82 +1,88 @@
 import sqlite3
 
 conn = sqlite3.connect("bot.db", check_same_thread=False)
-cursor = conn.cursor()
+cur = conn.cursor()
 
 # USERS
-cursor.execute("""
+cur.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     points INTEGER DEFAULT 0,
-    vip INTEGER DEFAULT 0,
     referrals INTEGER DEFAULT 0,
-    invited_by INTEGER
+    last_bonus INTEGER DEFAULT 0
 )
 """)
 
-# WITHDRAWALS
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS withdrawals (
+# WITHDRAW
+cur.execute("""
+CREATE TABLE IF NOT EXISTS withdraws (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     amount REAL,
+    method TEXT,
+    address TEXT,
+    status TEXT DEFAULT 'pending'
+)
+""")
+
+# ADS
+cur.execute("""
+CREATE TABLE IF NOT EXISTS ads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    text TEXT,
     status TEXT DEFAULT 'pending'
 )
 """)
 
 conn.commit()
 
-# ======================
-def get_user(user_id):
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
 
-    if not user:
-        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+def get_user(uid):
+    cur.execute("SELECT * FROM users WHERE user_id=?", (uid,))
+    u = cur.fetchone()
+
+    if not u:
+        cur.execute("INSERT INTO users (user_id) VALUES (?)", (uid,))
         conn.commit()
-        return (user_id, 0, 0, 0, None)
+        return (uid, 0, 0, 0)
 
-    return user
+    return u
 
 
-def add_points(user_id, amount):
-    cursor.execute(
-        "UPDATE users SET points = points + ? WHERE user_id=?",
-        (amount, user_id)
-    )
+def add_points(uid, p):
+    cur.execute("UPDATE users SET points = points + ? WHERE user_id=?", (p, uid))
     conn.commit()
 
 
-def get_points(user_id):
-    return get_user(user_id)[1]
-
-
-def add_referral(user_id):
-    cursor.execute(
-        "UPDATE users SET referrals = referrals + 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-
-
-def set_vip(user_id, level):
-    cursor.execute("UPDATE users SET vip=? WHERE user_id=?", (level, user_id))
-    conn.commit()
-
-
-def create_withdraw(user_id, amount):
-    cursor.execute(
-        "INSERT INTO withdrawals (user_id, amount) VALUES (?, ?)",
-        (user_id, amount)
-    )
+def create_withdraw(uid, amount, method, address):
+    cur.execute("""
+        INSERT INTO withdraws (user_id, amount, method, address)
+        VALUES (?, ?, ?, ?)
+    """, (uid, amount, method, address))
     conn.commit()
 
 
 def get_pending_withdraws():
-    cursor.execute("SELECT * FROM withdrawals WHERE status='pending'")
-    return cursor.fetchall()
+    cur.execute("SELECT * FROM withdraws WHERE status='pending'")
+    return cur.fetchall()
 
 
 def update_withdraw(id, status):
-    cursor.execute("UPDATE withdrawals SET status=? WHERE id=?", (status, id))
+    cur.execute("UPDATE withdraws SET status=? WHERE id=?", (status, id))
+    conn.commit()
+
+
+def create_ad(uid, text):
+    cur.execute("INSERT INTO ads (user_id, text) VALUES (?, ?)", (uid, text))
+    conn.commit()
+
+
+def get_ads():
+    cur.execute("SELECT * FROM ads WHERE status='pending'")
+    return cur.fetchall()
+
+
+def update_ad(id, status):
+    cur.execute("UPDATE ads SET status=? WHERE id=?", (status, id))
     conn.commit()
