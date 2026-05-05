@@ -10,7 +10,6 @@ dp = Dispatcher(bot)
 
 # ================= STATE =================
 state = {}
-cooldown = {}
 
 # ================= SETTINGS =================
 BONUS = 10
@@ -18,12 +17,24 @@ MIN_WITHDRAW = 100
 RATE = 0.013
 TASK_COST = 20
 
+# ================= HELPERS =================
+def broadcast(text):
+    cur.execute("SELECT user_id FROM users")
+    users = cur.fetchall()
+
+    for u in users:
+        try:
+            bot.send_message(u[0], text)
+        except:
+            pass
+
+
 # ================= UI =================
 def main_menu(u):
     kb = InlineKeyboardMarkup(row_width=2)
 
     kb.add(
-        InlineKeyboardButton(f"💰 Wallet ({u[1]})", callback_data="wallet"),
+        InlineKeyboardButton("💰 Wallet", callback_data="wallet"),
         InlineKeyboardButton("🎁 Bonus", callback_data="bonus")
     )
 
@@ -33,19 +44,24 @@ def main_menu(u):
     )
 
     kb.add(
-        InlineKeyboardButton("👥 Referrals", callback_data="ref"),
-        InlineKeyboardButton("🔁 Transfer", callback_data="transfer")
+        InlineKeyboardButton("👥 Referrals", callback_data="ref")
     )
 
     return kb
 
 
-def admin_menu():
-    kb = InlineKeyboardMarkup()
+def market_menu():
+    kb = InlineKeyboardMarkup(row_width=2)
+
     kb.add(
-        InlineKeyboardButton("📊 Stats", callback_data="admin_stats"),
-        InlineKeyboardButton("💸 Withdraws", callback_data="admin_w")
+        InlineKeyboardButton("📢 Sell Offer", callback_data="sell"),
+        InlineKeyboardButton("📣 Ads", callback_data="ads")
     )
+
+    kb.add(
+        InlineKeyboardButton("🎁 Gifts", callback_data="gift")
+    )
+
     return kb
 
 
@@ -55,7 +71,7 @@ async def start(m: types.Message):
     user = get_user(m.from_user.id)
 
     if m.from_user.id in ADMIN_IDS:
-        return await m.answer("🛠 Admin Panel", reply_markup=admin_menu())
+        return await m.answer("🛠 Admin Panel Active")
 
     await m.answer("🚀 Welcome to Earn Platform", reply_markup=main_menu(user))
 
@@ -84,26 +100,42 @@ async def cb(c: types.CallbackQuery):
         add_points(c.from_user.id, BONUS)
         set_bonus(c.from_user.id)
 
-        return await c.message.answer(f"🎁 +{BONUS} points")
+        return await c.message.answer(f"🎁 +{BONUS} points added")
 
-    # ================= MARKETPLACE =================
+    # ================= MARKET =================
     elif c.data == "market":
+        return await c.message.answer("🧩 Marketplace", reply_markup=market_menu())
 
-        kb = InlineKeyboardMarkup(row_width=2)
-        kb.add(
-            InlineKeyboardButton("📢 Channel Ads", callback_data="task_channel"),
-            InlineKeyboardButton("🤖 Bot Ads", callback_data="task_bot")
-        )
-        kb.add(
-            InlineKeyboardButton("🛒 Sell Offer", callback_data="task_sell"),
-            InlineKeyboardButton("🎁 Gifts", callback_data="task_gift")
+    # ================= SELL OFFER =================
+    elif c.data == "sell":
+        state[c.from_user.id] = "sell"
+        return await c.message.answer(
+            "🛒 Create Offer\n\nSend:\nTitle | Price | Description\n\n💡 Will be published in marketplace"
         )
 
-        return await c.message.answer("🧩 Marketplace", reply_markup=kb)
+    # ================= ADS =================
+    elif c.data == "ads":
+        state[c.from_user.id] = "ads"
+        return await c.message.answer(
+            "📢 Create Ad\n\nSend:\nText | Target Link\n\n💰 Cost: 20 points"
+        )
 
-    # ================= REFERRALS =================
+    # ================= GIFTS =================
+    elif c.data == "gift":
+        state[c.from_user.id] = "gift"
+        return await c.message.answer(
+            "🎁 Gift Offer\nSend:\nGift Name | Price"
+        )
+
+    # ================= WITHDRAW =================
+    elif c.data == "withdraw":
+        state[c.from_user.id] = "withdraw"
+        return await c.message.answer(
+            "💸 Withdraw System\n\nSend:\nmethod address\n\nMin: 100 points"
+        )
+
+    # ================= REF =================
     elif c.data == "ref":
-
         link = f"https://t.me/{(await bot.get_me()).username}?start={c.from_user.id}"
 
         return await c.message.answer(
@@ -112,118 +144,70 @@ async def cb(c: types.CallbackQuery):
             "💰 Earn +10 per user"
         )
 
-    # ================= WITHDRAW =================
-    elif c.data == "withdraw":
 
-        kb = InlineKeyboardMarkup(row_width=2)
-        kb.add(
-            InlineKeyboardButton("📱 Vodafone Cash", callback_data="w_voda"),
-            InlineKeyboardButton("💳 Binance", callback_data="w_binance")
-        )
-        kb.add(
-            InlineKeyboardButton("💼 TON Wallet", callback_data="w_ton")
-        )
-
-        state[c.from_user.id] = "withdraw_step"
-
-        return await c.message.answer(
-            f"💸 Withdraw\nMin: {MIN_WITHDRAW}",
-            reply_markup=kb
-        )
-
-    # ================= TRANSFER =================
-    elif c.data == "transfer":
-        state[c.from_user.id] = "transfer"
-        return await c.message.answer("🔁 Send:\nuser_id amount")
-
-    # ================= ADMIN =================
-    if c.from_user.id in ADMIN_IDS:
-
-        if c.data == "admin_stats":
-            cur.execute("SELECT COUNT(*) FROM users")
-            users = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM tasks")
-            tasks = cur.fetchone()[0]
-
-            await c.message.answer(
-                f"📊 Stats\n👥 Users: {users}\n🧩 Tasks: {tasks}"
-            )
-
-
-# ================= TEXT =================
+# ================= TEXT FLOW =================
 @dp.message_handler()
 async def text(m: types.Message):
     uid = m.from_user.id
     u = get_user(uid)
 
-    now = time.time()
-    if uid in cooldown and now - cooldown[uid] < 2:
-        return
-    cooldown[uid] = now
-
-    # ================= WITHDRAW FLOW =================
-    if uid in state and state[uid] == "withdraw_step":
-        method = m.text
-
-        state[uid] = "withdraw_address"
-        state[f"{uid}_method"] = method
-
-        return await m.answer("📤 Send your wallet/address")
-
-    if uid in state and state[uid] == "withdraw_address":
-
-        method = state.get(f"{uid}_method")
-        address = m.text
-
-        if u[1] < MIN_WITHDRAW:
-            return await m.answer("❌ Not enough points")
-
-        create_withdraw(uid, u[1]*RATE, method, address)
-
-        state.pop(uid)
-        state.pop(f"{uid}_method")
-
-        return await m.answer("✅ Withdraw submitted")
-
-    # ================= MARKETPLACE TASKS =================
-    if uid in state and state[uid].startswith("task"):
-
+    # ================= SELL =================
+    if uid in state and state[uid] == "sell":
         try:
-            link, reward = m.text.split("|")
+            title, price, desc = m.text.split("|")
 
-            if u[1] < TASK_COST:
+            broadcast(
+                f"🛒 NEW OFFER\n\n"
+                f"👤 @{m.from_user.username}\n"
+                f"📌 {title}\n"
+                f"💰 {price}\n"
+                f"📝 {desc}"
+            )
+
+            state.pop(uid)
+
+            return await m.answer("✅ Offer published to marketplace")
+
+        except:
+            return await m.answer("❌ format: title | price | desc")
+
+    # ================= ADS =================
+    if uid in state and state[uid] == "ads":
+        try:
+            text, link = m.text.split("|")
+
+            if u[1] < 20:
                 return await m.answer("❌ Not enough points")
 
-            add_points(uid, -TASK_COST)
-            add_task(uid, link, int(reward))
+            add_points(uid, -20)
+
+            broadcast(
+                f"📢 ADVERTISEMENT\n\n{text}\n\n🔗 {link}"
+            )
 
             state.pop(uid)
 
-            return await m.answer("✅ Offer published")
+            return await m.answer("✅ Ad published")
 
         except:
-            return await m.answer("❌ format: link | reward")
+            return await m.answer("❌ format: text | link")
 
-    # ================= TRANSFER =================
-    if uid in state and state[uid] == "transfer":
-
+    # ================= WITHDRAW =================
+    if uid in state and state[uid] == "withdraw":
         try:
-            to_id, amount = m.text.split()
-            amount = int(amount)
+            method, address = m.text.split(" ", 1)
 
-            if u[1] < amount:
-                return await m.answer("❌ Not enough balance")
+            if u[1] < MIN_WITHDRAW:
+                return await m.answer("❌ Minimum 100 points")
 
-            add_points(uid, -amount)
-            add_points(int(to_id), amount)
+            create_withdraw(uid, u[1]*RATE, method, address)
 
             state.pop(uid)
 
-            return await m.answer("✅ Transferred")
+            return await m.answer("✅ Withdraw request sent")
 
         except:
-            return await m.answer("❌ format: user_id amount")
+            return await m.answer("❌ format: method address")
 
 
 # ================= RUN =================
