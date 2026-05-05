@@ -1,7 +1,5 @@
 import logging
-import os
 from aiogram import Bot, Dispatcher, types, executor
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
 
 from config import BOT_TOKEN, START_BONUS
 from database import get_user, update_points
@@ -12,14 +10,19 @@ from database import get_user, update_points
 logging.basicConfig(level=logging.INFO)
 
 # ======================
+# CHECK TOKEN
+# ======================
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN is missing in Railway Variables")
+
+# ======================
 # BOT INIT
 # ======================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
 
 # ======================
-# SAFE USER GET OR CREATE
+# SAFE USER
 # ======================
 def ensure_user(user_id: int):
     try:
@@ -29,37 +32,34 @@ def ensure_user(user_id: int):
         return None
 
 # ======================
-# START COMMAND
+# START
 # ======================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    user_id = message.from_user.id
-    user = ensure_user(user_id)
+    user = ensure_user(message.from_user.id)
 
     if not user:
-        await message.answer("❌ حدث خطأ في إنشاء الحساب، حاول لاحقًا.")
-        return
+        return await message.answer("❌ Error creating account")
 
     await message.answer(
-        f"👋 أهلاً {message.from_user.first_name}\n\n"
-        f"🎯 تم تسجيلك بنجاح في النظام\n"
-        f"💰 نقاطك: {user[1]}"
+        f"👋 Welcome {message.from_user.first_name}\n"
+        f"💰 Points: {user[1]}"
     )
 
 # ======================
-# POINTS COMMAND
+# POINTS
 # ======================
 @dp.message_handler(commands=["points"])
 async def points(message: types.Message):
     user = ensure_user(message.from_user.id)
 
     if not user:
-        return await message.answer("❌ خطأ في جلب البيانات")
+        return await message.answer("❌ Error")
 
-    await message.answer(f"💰 نقاطك الحالية: {user[1]}")
+    await message.answer(f"💰 Points: {user[1]}")
 
 # ======================
-# BONUS COMMAND (TEST)
+# BONUS
 # ======================
 @dp.message_handler(commands=["bonus"])
 async def bonus(message: types.Message):
@@ -68,33 +68,31 @@ async def bonus(message: types.Message):
     update_points(user_id, START_BONUS)
     user = ensure_user(user_id)
 
-    await message.answer(
-        f"🎁 تم إضافة {START_BONUS} نقطة\n"
-        f"💰 رصيدك الآن: {user[1]}"
-    )
+    if user:
+        await message.answer(
+            f"🎁 +{START_BONUS} points\n"
+            f"💰 Total: {user[1]}"
+        )
 
 # ======================
-# HELP COMMAND
+# HELP
 # ======================
 @dp.message_handler(commands=["help"])
 async def help_cmd(message: types.Message):
     await message.answer(
-        "📌 الأوامر المتاحة:\n"
-        "/start - بدء البوت\n"
-        "/points - عرض نقاطك\n"
-        "/bonus - اختبار إضافة نقاط"
+        "/start\n/points\n/bonus"
     )
 
 # ======================
-# FALLBACK (أي رسالة غير أوامر)
+# FALLBACK
 # ======================
 @dp.message_handler()
 async def fallback(message: types.Message):
-    await message.answer("🤖 استخدم /help لعرض الأوامر")
+    await message.answer("Use /help")
 
 # ======================
-# RUN BOT
+# RUN
 # ======================
 if __name__ == "__main__":
-    logging.info("Bot is starting...")
+    logging.info("Bot started")
     executor.start_polling(dp, skip_updates=True)
