@@ -1,4 +1,5 @@
 import time
+import random
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -12,6 +13,7 @@ RATE = 0.013
 MIN_WITHDRAW = 100
 BONUS = 10
 AD_COST = 50
+TASK_COST = 20
 
 STATE = {}
 ANTI_SPAM = {}
@@ -69,19 +71,44 @@ async def admin_cmds(m: types.Message):
     try:
         args = m.text.split()
 
+        # ➕ Add Points
         if args[0] == "/addpoints":
             add_points(int(args[1]), int(args[2]))
-            return await m.answer("✅ Added")
+            return await m.answer("✅ Points added")
 
+        # ➖ Remove Points
         if args[0] == "/removepoints":
             add_points(int(args[1]), -int(args[2]))
-            return await m.answer("✅ Removed")
+            return await m.answer("✅ Points removed")
 
-        if args[0] == "/balance":
-            cur.execute("SELECT points FROM users WHERE user_id=?", (int(args[1]),))
-            r = cur.fetchone()
-            return await m.answer(f"💰 {r[0] if r else 0}")
+        # 🎁 Giveaway
+        if args[0] == "/giveaway":
+            amount = int(args[1])
 
+            cur.execute("SELECT user_id FROM users")
+            users = cur.fetchall()
+
+            winner = random.choice(users)[0]
+            add_points(winner, amount)
+
+            return await m.answer(f"🎉 Winner: {winner}\n+{amount} pts")
+
+        # 📢 Broadcast
+        if args[0] == "/broadcast":
+            msg = m.text.replace("/broadcast", "")
+
+            cur.execute("SELECT user_id FROM users")
+            users = cur.fetchall()
+
+            for u in users:
+                try:
+                    await bot.send_message(u[0], msg)
+                except:
+                    pass
+
+            return await m.answer("📢 Sent")
+
+        # 📊 Stats
         if args[0] == "/stats":
             cur.execute("SELECT COUNT(*) FROM users")
             users = cur.fetchone()[0]
@@ -108,9 +135,21 @@ async def cb(c: types.CallbackQuery):
 
     await c.answer()
 
-    if c.data == "wallet":
-        return await c.message.answer(f"💰 {u[2]} pts", reply_markup=back())
+    # SPAM PROTECTION
+    now = time.time()
+    if uid in ANTI_SPAM and now - ANTI_SPAM[uid] < 2:
+        return
+    ANTI_SPAM[uid] = now
 
+    # BACK
+    if c.data == "back":
+        return await c.message.answer("🏠 Menu", reply_markup=menu(u, uid))
+
+    # WALLET
+    if c.data == "wallet":
+        return await c.message.answer(f"💰 Points: {u[2]}", reply_markup=back())
+
+    # BONUS
     if c.data == "bonus":
         if int(time.time()) - u[3] < 86400:
             return await c.message.answer("⏳ Cooldown")
@@ -119,6 +158,7 @@ async def cb(c: types.CallbackQuery):
         set_bonus(uid)
         return await c.message.answer("🎁 Bonus added")
 
+    # MARKETPLACE
     if c.data == "market":
         tasks = get_tasks()
         for t in tasks:
@@ -126,39 +166,46 @@ async def cb(c: types.CallbackQuery):
             kb.add(InlineKeyboardButton("🚀 Join", callback_data=f"do_{t[0]}"))
             await c.message.answer(f"{t[2]}\n💰 {t[4]}", reply_markup=kb)
 
+    # DO TASK
     if c.data.startswith("do_"):
         tid = int(c.data.split("_")[1])
 
         if is_done(uid, tid):
-            return await c.message.answer("❌ Done")
+            return await c.message.answer("❌ Already done")
 
         t = next((x for x in get_tasks() if x[0] == tid), None)
         mark_done(uid, tid)
         add_points(uid, t[4])
 
-        return await c.message.answer(f"+{t[4]} pts")
+        return await c.message.answer(f"🎉 +{t[4]} pts")
 
+    # ADS
     if c.data == "ads":
         ads = get_ads()
         for a in ads:
             await c.message.answer(f"📢 {a[2]}")
 
+    # ADD TASK
     if c.data == "add_task":
         STATE[uid] = "add_task"
         return await c.message.answer("Title | Link | Reward | Budget")
 
+    # ADD AD
     if c.data == "add_ad":
         STATE[uid] = "add_ad"
         return await c.message.answer("Text | hours (cost 50 pts)")
 
+    # WITHDRAW
     if c.data == "withdraw":
         STATE[uid] = "withdraw"
         return await c.message.answer("Send: method address")
 
+    # TRANSFER
     if c.data == "transfer":
         STATE[uid] = "transfer"
         return await c.message.answer("Send: @user amount")
 
+    # REF
     if c.data == "ref":
         link = f"https://t.me/{(await bot.get_me()).username}?start={uid}"
         return await c.message.answer(link)
@@ -169,16 +216,17 @@ async def cb(c: types.CallbackQuery):
 
         kb.add(
             InlineKeyboardButton("💸 Withdraws", callback_data="admin_w"),
-            InlineKeyboardButton("📢 Broadcast", callback_data="admin_b")
+            InlineKeyboardButton("🎁 Giveaway", callback_data="admin_g")
         )
 
         kb.add(
-            InlineKeyboardButton("👤 Users", callback_data="admin_u"),
+            InlineKeyboardButton("📢 Broadcast", callback_data="admin_b"),
             InlineKeyboardButton("📊 Stats", callback_data="admin_s")
         )
 
         return await c.message.answer("🛠 Admin Panel", reply_markup=kb)
 
+    # WITHDRAW LIST
     if c.data == "admin_w":
         ws = get_withdraws()
         for w in ws:
@@ -189,6 +237,17 @@ async def cb(c: types.CallbackQuery):
             )
             await c.message.answer(f"{w[1]} | {w[2]}", reply_markup=kb)
 
+    # GIVEAWAY
+    if c.data == "admin_g":
+        STATE[uid] = "giveaway"
+        return await c.message.answer("🎁 Send amount")
+
+    # BROADCAST
+    if c.data == "admin_b":
+        STATE[uid] = "broadcast"
+        return await c.message.answer("📢 Send message")
+
+    # STATS
     if c.data == "admin_s":
         cur.execute("SELECT COUNT(*) FROM users")
         users = cur.fetchone()[0]
@@ -214,18 +273,19 @@ async def cb(c: types.CallbackQuery):
 @dp.message_handler()
 async def text(m: types.Message):
     uid = m.from_user.id
-    u = get_user(uid, m.from_user.username)
 
     if uid not in STATE:
         return
 
     try:
 
+        # WITHDRAW
         if STATE[uid] == "withdraw":
             method, address = m.text.split(" ", 1)
             STATE.pop(uid)
             return await m.answer("✅ Sent")
 
+        # TRANSFER
         if STATE[uid] == "transfer":
             username, amount = m.text.split()
             amount = int(amount)
@@ -242,6 +302,7 @@ async def text(m: types.Message):
             STATE.pop(uid)
             return await m.answer("✅ Done")
 
+        # ADD TASK
         if STATE[uid] == "add_task":
             title, link, reward, budget = m.text.split("|")
 
@@ -252,6 +313,7 @@ async def text(m: types.Message):
             STATE.pop(uid)
             return await m.answer("✅ Task added")
 
+        # ADD AD
         if STATE[uid] == "add_ad":
             text, hours = m.text.split("|")
 
@@ -263,6 +325,35 @@ async def text(m: types.Message):
 
             STATE.pop(uid)
             return await m.answer("📢 Ad added")
+
+        # GIVEAWAY EXECUTE
+        if STATE[uid] == "giveaway":
+            amount = int(m.text)
+
+            cur.execute("SELECT user_id FROM users")
+            users = cur.fetchall()
+
+            winner = random.choice(users)[0]
+            add_points(winner, amount)
+
+            STATE.pop(uid)
+            return await m.answer(f"🎉 Winner: {winner}")
+
+        # BROADCAST EXECUTE
+        if STATE[uid] == "broadcast":
+            msg = m.text
+
+            cur.execute("SELECT user_id FROM users")
+            users = cur.fetchall()
+
+            for u in users:
+                try:
+                    await bot.send_message(u[0], msg)
+                except:
+                    pass
+
+            STATE.pop(uid)
+            return await m.answer("📢 Sent")
 
     except:
         await m.answer("❌ Error format")
