@@ -8,6 +8,7 @@ cur = conn.cursor()
 cur.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
+    username TEXT,
     points INTEGER DEFAULT 0,
     last_bonus INTEGER DEFAULT 0,
     invited_by INTEGER,
@@ -15,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
-# ===== REF TRACK (one-time credit) =====
+# ===== REF TRACK =====
 cur.execute("""
 CREATE TABLE IF NOT EXISTS referrals (
     user_id INTEGER PRIMARY KEY,
@@ -62,28 +63,45 @@ CREATE TABLE IF NOT EXISTS withdraws (
 conn.commit()
 
 # ================= USERS =================
-def get_user(uid):
+def get_user(uid, username=None):
     cur.execute("SELECT * FROM users WHERE user_id=?", (uid,))
     u = cur.fetchone()
+
     if not u:
         cur.execute(
-            "INSERT INTO users (user_id, points, last_bonus, invited_by, created_at) VALUES (?,?,?,?,?)",
-            (uid, 0, 0, None, int(time.time()))
+            "INSERT INTO users (user_id, username, points, last_bonus, invited_by, created_at) VALUES (?,?,?,?,?,?)",
+            (uid, username, 0, 0, None, int(time.time()))
         )
         conn.commit()
-        return (uid, 0, 0, None, int(time.time()))
+        return (uid, username, 0, 0, None, int(time.time()))
+
+    # update username لو اتغير
+    if username and u[1] != username:
+        cur.execute("UPDATE users SET username=? WHERE user_id=?", (username, uid))
+        conn.commit()
+
     return u
+
+
+def get_user_by_username(username):
+    if not username:
+        return None
+    username = username.replace("@", "")
+    cur.execute("SELECT * FROM users WHERE username=?", (username,))
+    return cur.fetchone()
+
 
 def add_points(uid, amount):
     cur.execute("UPDATE users SET points = points + ? WHERE user_id=?", (amount, uid))
     conn.commit()
 
+
 def set_bonus(uid):
     cur.execute("UPDATE users SET last_bonus=? WHERE user_id=?", (int(time.time()), uid))
     conn.commit()
 
+
 def set_ref(user_id, referrer_id):
-    # once per user
     cur.execute("SELECT * FROM referrals WHERE user_id=?", (user_id,))
     if cur.fetchone():
         return False
@@ -99,14 +117,26 @@ def add_task(owner, title, link, reward, max_workers):
     )
     conn.commit()
 
-def get_active_tasks(limit=20):
+
+def get_active_tasks():
     cur.execute("""
     SELECT * FROM tasks
     WHERE active=1 AND done_count < max_workers
     ORDER BY id DESC
-    LIMIT ?
-    """, (limit,))
+    LIMIT 20
+    """)
     return cur.fetchall()
+
+
+def get_task(task_id):
+    cur.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+    return cur.fetchone()
+
+
+def is_done(uid, task_id):
+    cur.execute("SELECT 1 FROM task_done WHERE user_id=? AND task_id=?", (uid, task_id))
+    return cur.fetchone() is not None
+
 
 def mark_done(uid, task_id):
     try:
@@ -117,14 +147,6 @@ def mark_done(uid, task_id):
     except:
         return False
 
-def is_done(uid, task_id):
-    cur.execute("SELECT 1 FROM task_done WHERE user_id=? AND task_id=?", (uid, task_id))
-    return cur.fetchone() is not None
-
-def get_task(task_id):
-    cur.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
-    return cur.fetchone()
-
 # ================= WITHDRAW =================
 def create_withdraw(uid, amount, method, address):
     cur.execute("""
@@ -133,9 +155,11 @@ def create_withdraw(uid, amount, method, address):
     """, (uid, amount, method, address, int(time.time())))
     conn.commit()
 
+
 def get_pending_withdraws():
     cur.execute("SELECT * FROM withdraws WHERE status='pending' ORDER BY id DESC")
     return cur.fetchall()
+
 
 def set_withdraw_status(wid, status):
     cur.execute("UPDATE withdraws SET status=? WHERE id=?", (status, wid))
