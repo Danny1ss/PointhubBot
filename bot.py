@@ -4,6 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import BOT_TOKEN, ADMIN_IDS
 from database import *
+from database import cur, conn  # ✅ إضافة مهمة
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -39,7 +40,8 @@ def menu(u):
         InlineKeyboardButton("👥 Referral", callback_data="ref")
     )
 
-    if u[0] in ADMIN_IDS:
+    # ✅ إصلاح الأدمن
+    if int(u[0]) in ADMIN_IDS:
         kb.add(InlineKeyboardButton("🛠 Admin Panel", callback_data="admin"))
 
     return kb
@@ -135,7 +137,7 @@ async def cb(c: types.CallbackQuery):
         for a in ads:
             await c.message.answer(f"📢 {a[2]}\n⏱ {a[3]}h")
 
-    # ADD TASK START
+    # ADD TASK
     if c.data == "add_task":
         STATE[uid] = "add_task"
         return await c.message.answer(
@@ -150,7 +152,7 @@ async def cb(c: types.CallbackQuery):
     # TRANSFER
     if c.data == "transfer":
         STATE[uid] = "transfer"
-        return await c.message.answer("🔁 Send: @user amount")
+        return await c.message.answer("🔁 Send: @username amount")
 
     # REF
     if c.data == "ref":
@@ -215,21 +217,26 @@ async def text(m: types.Message):
             STATE.pop(uid)
             return await m.answer("✅ Withdraw sent")
 
-        # TRANSFER
+        # TRANSFER (✅ FIXED)
         if STATE[uid] == "transfer":
             username, amount = m.text.split()
             amount = int(amount)
 
-            target = get_user(username)
+            username = username.replace("@", "")
+
+            cur.execute("SELECT * FROM users WHERE username=?", (username,))
+            target = cur.fetchone()
 
             if not target:
                 return await m.answer("❌ User not found")
+
+            target_id = target[0]
 
             if u[2] < amount:
                 return await m.answer("❌ Not enough points")
 
             add_points(uid, -amount)
-            add_points(target[0], amount)
+            add_points(target_id, amount)
 
             STATE.pop(uid)
             return await m.answer("✅ Transfer done")
