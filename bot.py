@@ -1,5 +1,4 @@
 import time
-import random
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -13,13 +12,7 @@ STATE = {}
 ANTI_SPAM = {}
 USER_TUTORIAL = {}
 
-# ================= ADS PRICES =================
-AD_PRICES = {
-    6: 20,
-    12: 35,
-    24: 50,
-    48: 90
-}
+AD_PRICES = {6: 20, 12: 35, 24: 50, 48: 90}
 
 BONUS_AMOUNT = 10
 RATE = 0.013
@@ -49,9 +42,7 @@ def menu(u, uid):
         InlineKeyboardButton("🔁 Transfer", callback_data="transfer")
     )
 
-    kb.add(
-        InlineKeyboardButton("📘 Help", callback_data="help")
-    )
+    kb.add(InlineKeyboardButton("📘 Help", callback_data="help"))
 
     if uid in ADMIN_IDS:
         kb.add(InlineKeyboardButton("🛠 Admin Panel", callback_data="admin"))
@@ -65,7 +56,7 @@ def back():
     return kb
 
 
-# ================= START + ONBOARDING =================
+# ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
     uid = m.from_user.id
@@ -79,8 +70,7 @@ async def start(m: types.Message):
         )
 
         return await m.answer(
-            "👋 Welcome to Reward Platform\n\n"
-            "💡 Earn points, run ads, complete tasks and withdraw rewards.",
+            "👋 Welcome!\nEarn points, run ads, complete tasks.",
             reply_markup=kb
         )
 
@@ -97,7 +87,7 @@ async def cb(c: types.CallbackQuery):
 
     # SPAM PROTECTION
     now = time.time()
-    if uid in ANTI_SPAM and now - ANTI_SPAM[uid] < 2:
+    if uid in ANTI_SPAM and now - ANTI_SPAM[uid] < 1.5:
         return
     ANTI_SPAM[uid] = now
 
@@ -133,25 +123,27 @@ async def cb(c: types.CallbackQuery):
             kb.add(InlineKeyboardButton("🚀 Complete", callback_data=f"do_{t[0]}"))
 
             await c.message.answer(
-                f"🧩 {t[2]}\n💰 Reward: {t[4]} pts",
+                f"🧩 {t[2]}\n💰 {t[4]} pts",
                 reply_markup=kb
             )
 
-    # DO TASK
+    # DO TASK SAFE
     if c.data.startswith("do_"):
         tid = int(c.data.split("_")[1])
 
         if is_done(uid, tid):
             return await c.message.answer("❌ Already done")
 
-        t = next((x for x in get_tasks() if x[0] == tid), None)
+        task = next((x for x in get_tasks() if x[0] == tid), None)
+        if not task:
+            return await c.message.answer("❌ Task not found")
 
         mark_done(uid, tid)
-        add_points(uid, t[4])
+        add_points(uid, task[4])
 
-        return await c.message.answer(f"🎉 +{t[4]} pts")
+        return await c.message.answer(f"🎉 +{task[4]} pts")
 
-    # ADS LIST
+    # ADS
     if c.data == "ads":
         ads = get_ads()
 
@@ -166,17 +158,17 @@ async def cb(c: types.CallbackQuery):
         STATE[uid] = "task"
         return await c.message.answer("Send: Title | Link | Reward | Budget")
 
-    # ADD AD FLOW
+    # ADD AD
     if c.data == "add_ad":
         STATE[uid] = "ad_text"
         return await c.message.answer("✍ Send ad text")
 
-    # SELECT AD DURATION
+    # AD DURATION
     if c.data.startswith("ad_"):
         hours = int(c.data.split("_")[1])
-        text = STATE.get(uid, {}).get("text")
+        data = STATE.get(uid)
 
-        if not text:
+        if not isinstance(data, dict) or "text" not in data:
             return await c.message.answer("❌ Restart ad process")
 
         price = AD_PRICES.get(hours)
@@ -187,7 +179,7 @@ async def cb(c: types.CallbackQuery):
         add_points(uid, -price)
 
         cur.execute("INSERT INTO ads VALUES (NULL,?,?,?)",
-                    (uid, text, hours))
+                    (uid, data["text"], hours))
         conn.commit()
 
         STATE.pop(uid, None)
@@ -197,56 +189,30 @@ async def cb(c: types.CallbackQuery):
     # HELP
     if c.data == "help":
         return await c.message.answer(
-            "📘 GUIDE:\n\n"
-            "💰 Wallet → balance\n"
-            "🧩 Marketplace → tasks\n"
-            "📢 Ads → view ads\n"
-            "➕ Add Ad → publish ad\n\n"
-            "💡 Earn by completing tasks and running ads"
+            "📘 GUIDE:\n"
+            "Wallet - balance\nMarketplace - tasks\nAds - ads system\nAdd Ad - publish ads"
         )
 
-    # ADMIN PANEL
+    # ================= ADMIN =================
     if c.data == "admin":
-        kb = InlineKeyboardMarkup(row_width=2)
+        if uid not in ADMIN_IDS:
+            return await c.message.answer("❌ Not allowed")
 
+        kb = InlineKeyboardMarkup(row_width=2)
         kb.add(
             InlineKeyboardButton("➕ Add Points", callback_data="adm_add"),
             InlineKeyboardButton("➖ Remove Points", callback_data="adm_remove")
         )
-
         kb.add(
             InlineKeyboardButton("📊 Stats", callback_data="adm_stats"),
             InlineKeyboardButton("🎁 Giveaway", callback_data="adm_give")
         )
-
-        kb.add(
-            InlineKeyboardButton("📢 Broadcast", callback_data="adm_broadcast")
-        )
+        kb.add(InlineKeyboardButton("📢 Broadcast", callback_data="adm_broadcast"))
 
         return await c.message.answer("🛠 Admin Panel", reply_markup=kb)
 
-    # ================= GUIDE SYSTEM =================
-    if c.data == "guide_skip":
-        USER_TUTORIAL[uid] = True
-        return await c.message.answer("✅ Guide skipped", reply_markup=menu(u, uid))
 
-    if c.data == "guide_start":
-        return await c.message.answer(
-            "💰 STEP 1: Earn points from tasks\n"
-            "🧩 STEP 2: Marketplace tasks\n"
-            "📢 STEP 3: Ads system\n"
-            "💸 STEP 4: Withdraw system",
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton("Finish ✅", callback_data="guide_finish")
-            )
-        )
-
-    if c.data == "guide_finish":
-        USER_TUTORIAL[uid] = True
-        return await c.message.answer("🎉 You're ready!", reply_markup=menu(u, uid))
-
-
-# ================= TEXT =================
+# ================= TEXT HANDLER =================
 @dp.message_handler()
 async def text(m: types.Message):
     uid = m.from_user.id
@@ -254,18 +220,22 @@ async def text(m: types.Message):
     if uid not in STATE:
         return
 
-    # TASK CREATE
+    # TASK
     if STATE[uid] == "task":
-        title, link, reward, budget = m.text.split("|")
+        try:
+            title, link, reward, budget = m.text.split("|")
 
-        cur.execute("INSERT INTO tasks VALUES (NULL,?,?,?,?,?,?)",
-                    (uid, title, link, int(reward), int(budget), int(budget)))
-        conn.commit()
+            cur.execute("INSERT INTO tasks VALUES (NULL,?,?,?,?,?,?)",
+                        (uid, title, link, int(reward), int(budget), int(budget)))
+            conn.commit()
 
-        STATE.pop(uid)
-        return await m.answer("✅ Task created")
+            STATE.pop(uid)
+            return await m.answer("✅ Task created")
 
-    # AD TEXT STEP
+        except:
+            return await m.answer("❌ Format: Title | Link | Reward | Budget")
+
+    # AD TEXT
     if STATE[uid] == "ad_text":
         STATE[uid] = {"text": m.text}
 
@@ -281,20 +251,39 @@ async def text(m: types.Message):
 
         return await m.answer("⏳ Choose duration")
 
-    # WITHDRAW
+    # WITHDRAW (REAL SAVE)
     if STATE[uid] == "withdraw":
         method, address = m.text.split(" ", 1)
 
-        STATE.pop(uid)
-        return await m.answer("✅ Withdraw sent")
+        cur.execute("INSERT INTO withdraws VALUES (NULL,?,?,?,?)",
+                    (uid, method, address, "pending"))
+        conn.commit()
 
-    # TRANSFER
+        STATE.pop(uid)
+        return await m.answer("💸 Withdraw request sent")
+
+    # TRANSFER SAFE
     if STATE[uid] == "transfer":
-        username, amount = m.text.split()
-        amount = int(amount)
+        try:
+            username, amount = m.text.split()
+            amount = int(amount)
 
-        STATE.pop(uid)
-        return await m.answer("✅ Transfer done")
+            target = get_user(username)
+
+            if not target:
+                return await m.answer("❌ User not found")
+
+            if u[2] < amount:
+                return await m.answer("❌ Not enough points")
+
+            add_points(uid, -amount)
+            add_points(target[0], amount)
+
+            STATE.pop(uid)
+            return await m.answer("✅ Transfer done")
+
+        except:
+            return await m.answer("❌ Format: @user amount")
 
 
 executor.start_polling(dp, skip_updates=True)
