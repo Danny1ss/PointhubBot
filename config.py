@@ -1,6 +1,7 @@
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 ADMIN_IDS = [8637717184]
 
 START_BONUS = 10
