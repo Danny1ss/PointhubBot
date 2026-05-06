@@ -1,5 +1,4 @@
 import time
-import random
 import logging
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -7,259 +6,246 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import BOT_TOKEN, ADMIN_IDS
 from database import *
 
-# ================= LOG =================
 logging.basicConfig(level=logging.INFO)
+
+if not BOT_TOKEN:
+    raise Exception("BOT_TOKEN missing")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
-state = {}
+STATE = {}
 
-# ================= SETTINGS =================
 RATE = 0.013
 MIN_WITHDRAW = 100
-BONUS = 10
+DAILY_BONUS = 10
 
-AD_PRICES = {
-    "hour": ("⏱ ساعة", 15),
-    "day": ("📆 يوم", 50),
-    "week": ("📅 أسبوع", 200)
-}
-
-# ================= FIX BUTTONS (IMPORTANT) =================
+# ===== Railway fix =====
 async def on_startup(dp):
     await bot.delete_webhook(drop_pending_updates=True)
 
-# ================= MENU =================
-def menu(user):
+# ===== UI =====
+def main_menu(user_id, points):
     kb = InlineKeyboardMarkup(row_width=2)
-
     kb.add(
-        InlineKeyboardButton(f"💰 محفظتي ({user[1]})", callback_data="wallet"),
-        InlineKeyboardButton("🎁 مكافأة", callback_data="bonus")
+        InlineKeyboardButton(f"💰 محفظتي ({points})", "wallet"),
+        InlineKeyboardButton("🎁 مكافأة يومية", "bonus")
     )
-
     kb.add(
-        InlineKeyboardButton("🧩 السوق", callback_data="market"),
-        InlineKeyboardButton("📢 إعلان", callback_data="ads")
+        InlineKeyboardButton("🧩 المهام", "tasks"),
+        InlineKeyboardButton("➕ إنشاء مهمة", "create_task")
     )
-
     kb.add(
-        InlineKeyboardButton("💸 سحب", callback_data="withdraw"),
-        InlineKeyboardButton("🔁 تحويل", callback_data="transfer")
+        InlineKeyboardButton("💸 سحب", "withdraw"),
+        InlineKeyboardButton("🔁 تحويل", "transfer")
     )
-
     kb.add(
-        InlineKeyboardButton("👥 إحالات", callback_data="ref")
+        InlineKeyboardButton("👥 إحالات", "ref")
     )
-
+    if user_id in ADMIN_IDS:
+        kb.add(InlineKeyboardButton("🛠 الأدمن", "admin"))
     return kb
 
-
-def admin_menu():
+def withdraw_methods_kb():
     kb = InlineKeyboardMarkup(row_width=2)
-
     kb.add(
-        InlineKeyboardButton("📊 إحصائيات", callback_data="admin_stats"),
-        InlineKeyboardButton("💸 السحوبات", callback_data="admin_w")
+        InlineKeyboardButton("📱 Vodafone", "w_voda"),
+        InlineKeyboardButton("💳 Binance", "w_binance")
     )
-
-    kb.add(
-        InlineKeyboardButton("🎁 رابط مكافأة", callback_data="admin_bonus")
-    )
-
+    kb.add(InlineKeyboardButton("💼 TON", "w_ton"))
     return kb
 
+def admin_kb():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("📊 إحصائيات", "a_stats"),
+        InlineKeyboardButton("💸 طلبات السحب", "a_withdraws")
+    )
+    return kb
 
-# ================= START =================
+# ===== START + REF =====
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    user = get_user(m.from_user.id)
+    args = m.get_args()
+    u = get_user(m.from_user.id)
 
-    kb = menu(user)
+    # referral (once)
+    if args.isdigit():
+        ref = int(args)
+        if ref != m.from_user.id:
+            if set_ref(m.from_user.id, ref):
+                add_points(ref, 10)
 
-    if m.from_user.id in ADMIN_IDS:
-        kb.add(InlineKeyboardButton("🛠 الأدمن", callback_data="admin"))
+    await m.answer(
+        "👋 أهلاً بك في المنصة\n💰 اجمع نقاط وحوّلها لأرباح",
+        reply_markup=main_menu(m.from_user.id, u[1])
+    )
 
-    await m.answer("🚀 أهلاً بيك في منصة الربح", reply_markup=kb)
-
-
-# ================= CALLBACK =================
+# ===== CALLBACK =====
 @dp.callback_query_handler()
 async def cb(c: types.CallbackQuery):
     await c.answer()
+    uid = c.from_user.id
+    u = get_user(uid)
 
-    u = get_user(c.from_user.id)
-
-    # ===== WALLET =====
+    # WALLET
     if c.data == "wallet":
         return await c.message.answer(
-            f"💰 نقاطك: {u[1]}\n💵 قيمتها: {u[1]*RATE:.2f}$"
+            f"💰 نقاطك: {u[1]}\n💵 القيمة التقريبية: {u[1]*RATE:.2f}$"
         )
 
-    # ===== BONUS =====
-    elif c.data == "bonus":
+    # BONUS
+    if c.data == "bonus":
         now = int(time.time())
+        if now - u[2] < 86400:
+            return await c.message.answer("⏳ متاح كل 24 ساعة")
+        add_points(uid, DAILY_BONUS)
+        set_bonus(uid)
+        return await c.message.answer(f"🎁 +{DAILY_BONUS} نقطة")
 
-        if now - u[3] < 86400:
-            return await c.message.answer("⏳ كل 24 ساعة فقط")
-
-        add_points(c.from_user.id, BONUS)
-        set_bonus(c.from_user.id)
-
-        return await c.message.answer("🎁 تم إضافة 10 نقاط")
-
-    # ===== MARKET =====
-    elif c.data == "market":
-        tasks = get_tasks()
-
+    # TASKS LIST
+    if c.data == "tasks":
+        tasks = get_active_tasks()
         if not tasks:
-            return await c.message.answer("❌ لا يوجد مهام")
-
+            return await c.message.answer("❌ لا توجد مهام حالياً")
         for t in tasks:
+            # t: (id, owner, title, link, reward, max_workers, done_count, active)
+            kb = InlineKeyboardMarkup()
+            kb.add(InlineKeyboardButton("🚀 تنفيذ", callback_data=f"do_{t[0]}"))
             await c.message.answer(
-                f"🧩 {t[2]}\n💰 {t[3]} نقطة"
+                f"🧩 {t[2]}\n🔗 {t[3]}\n💰 {t[4]} نقطة\n👥 {t[6]}/{t[5]}",
+                reply_markup=kb
             )
 
-    # ===== ADS =====
-    elif c.data == "ads":
-        kb = InlineKeyboardMarkup()
+    # DO TASK
+    if c.data.startswith("do_"):
+        tid = int(c.data.split("_")[1])
+        t = get_task(tid)
+        if not t or t[7] == 0 or t[6] >= t[5]:
+            return await c.message.answer("❌ المهمة غير متاحة")
+        if is_done(uid, tid):
+            return await c.message.answer("❌ نفذتها من قبل")
+        ok = mark_done(uid, tid)
+        if ok:
+            add_points(uid, t[4])
+            return await c.message.answer(f"🎉 تم التنفيذ +{t[4]} نقطة")
+        return await c.message.answer("❌ حدث خطأ")
 
-        for k, v in AD_PRICES.items():
-            kb.add(
-                InlineKeyboardButton(f"{v[0]} - {v[1]} نقطة", callback_data=f"ad_{k}")
-            )
-
-        return await c.message.answer("📢 اختر نوع الإعلان", reply_markup=kb)
-
-    elif c.data.startswith("ad_"):
-        state[c.from_user.id] = c.data
-        return await c.message.answer("✍ اكتب: نص الإعلان | الرابط")
-
-    # ===== WITHDRAW =====
-    elif c.data == "withdraw":
-        kb = InlineKeyboardMarkup()
-
-        kb.add(
-            InlineKeyboardButton("📱 فودافون", callback_data="w_voda"),
-            InlineKeyboardButton("💳 Binance", callback_data="w_binance")
+    # CREATE TASK
+    if c.data == "create_task":
+        STATE[uid] = "create_task"
+        return await c.message.answer(
+            "✍ اكتب:\nالعنوان | الرابط | المكافأة | عدد المنفذين\n\n"
+            "مثال:\nاشتراك بالقناة | https://t.me/xxx | 5 | 50"
         )
 
-        return await c.message.answer("💸 اختر طريقة السحب", reply_markup=kb)
+    # WITHDRAW
+    if c.data == "withdraw":
+        return await c.message.answer(
+            f"💸 السحب\n🔻 الحد الأدنى: {MIN_WITHDRAW} نقطة",
+            reply_markup=withdraw_methods_kb()
+        )
 
-    elif c.data.startswith("w_"):
-        state[c.from_user.id] = c.data
-        return await c.message.answer("📥 اكتب بيانات السحب")
+    if c.data.startswith("w_"):
+        STATE[uid] = c.data
+        return await c.message.answer("📥 اكتب رقمك/عنوانك:")
 
-    # ===== TRANSFER =====
-    elif c.data == "transfer":
-        state[c.from_user.id] = "transfer"
+    # TRANSFER
+    if c.data == "transfer":
+        STATE[uid] = "transfer"
         return await c.message.answer("✍ اكتب: @username 50")
 
-    # ===== REF =====
-    elif c.data == "ref":
-        link = f"https://t.me/{(await bot.get_me()).username}?start={c.from_user.id}"
+    # REF
+    if c.data == "ref":
+        link = f"https://t.me/{(await bot.get_me()).username}?start={uid}"
+        return await c.message.answer(
+            "👥 نظام الإحالات\n"
+            f"{link}\n\n💰 +10 لكل مستخدم جديد"
+        )
 
-        return await c.message.answer(f"👥 رابطك:\n{link}")
+    # ADMIN
+    if c.data == "admin":
+        return await c.message.answer("🛠 لوحة الأدمن", reply_markup=admin_kb())
 
-    # ===== ADMIN =====
-    elif c.data == "admin":
-        return await c.message.answer("🛠 لوحة الأدمن", reply_markup=admin_menu())
-
-    elif c.data == "admin_stats":
+    if c.data == "a_stats":
         cur.execute("SELECT COUNT(*) FROM users")
         users = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM tasks")
+        tasks = cur.fetchone()[0]
+        return await c.message.answer(f"👥 Users: {users}\n🧩 Tasks: {tasks}")
 
-        return await c.message.answer(f"👥 المستخدمين: {users}")
-
-    elif c.data == "admin_w":
-        w = get_withdraws()
-
-        if not w:
+    if c.data == "a_withdraws":
+        ws = get_pending_withdraws()
+        if not ws:
             return await c.message.answer("❌ لا يوجد طلبات")
+        for w in ws:
+            kb = InlineKeyboardMarkup()
+            kb.add(
+                InlineKeyboardButton("✅ قبول", callback_data=f"ok_{w[0]}"),
+                InlineKeyboardButton("❌ رفض", callback_data=f"no_{w[0]}")
+            )
+            await c.message.answer(
+                f"💸 ID:{w[0]}\n👤 {w[1]}\n💵 {w[2]}$\n📌 {w[3]}",
+                reply_markup=kb
+            )
 
-        for i in w:
-            await c.message.answer(f"💸 {i[2]}$ | {i[3]}")
+    if c.data.startswith("ok_") and uid in ADMIN_IDS:
+        wid = int(c.data.split("_")[1])
+        set_withdraw_status(wid, "approved")
+        return await c.message.answer("✅ تم القبول")
 
-    elif c.data == "admin_bonus":
-        code = str(random.randint(10000,99999))
-        save_bonus(code)
+    if c.data.startswith("no_") and uid in ADMIN_IDS:
+        wid = int(c.data.split("_")[1])
+        set_withdraw_status(wid, "rejected")
+        return await c.message.answer("❌ تم الرفض")
 
-        link = f"https://t.me/{(await bot.get_me()).username}?start=bonus_{code}"
-
-        return await c.message.answer(f"🎁 {link}")
-
-
-# ================= TEXT =================
+# ===== TEXT =====
 @dp.message_handler()
 async def text(m: types.Message):
     uid = m.from_user.id
     u = get_user(uid)
 
-    # ===== ADS =====
-    if uid in state and state[uid].startswith("ad_"):
-        typ = state[uid].split("_")[1]
-        price = AD_PRICES[typ][1]
-
+    # CREATE TASK FLOW
+    if uid in STATE and STATE[uid] == "create_task":
+        parts = [p.strip() for p in m.text.split("|")]
+        if len(parts) != 4:
+            return await m.answer("❌ الصيغة: عنوان | رابط | مكافأة | عدد")
+        title, link, reward, count = parts
         try:
-            text, link = m.text.split("|")
+            reward = int(reward)
+            count = int(count)
         except:
-            return await m.answer("❌ لازم: نص | رابط")
+            return await m.answer("❌ الأرقام غير صحيحة")
 
-        if u[1] < price:
-            return await m.answer("❌ نقاطك مش كفاية")
+        cost = reward * count
+        if u[1] < cost:
+            return await m.answer(f"❌ تحتاج {cost} نقطة")
 
-        add_points(uid, -price)
+        add_points(uid, -cost)
+        add_task(uid, title, link, reward, count)
+        STATE.pop(uid)
 
-        cur.execute("SELECT user_id FROM users")
-        users = cur.fetchall()
+        return await m.answer("✅ تم نشر المهمة بنجاح")
 
-        for us in users:
-            try:
-                await bot.send_message(us[0], f"📢 {text}\n🔗 {link}")
-            except:
-                pass
-
-        state.pop(uid)
-        return await m.answer("✅ تم نشر الإعلان")
-
-    # ===== WITHDRAW =====
-    if uid in state and state[uid].startswith("w_"):
+    # WITHDRAW FLOW
+    if uid in STATE and STATE[uid].startswith("w_"):
         if u[1] < MIN_WITHDRAW:
-            return await m.answer("❌ الحد الأدنى 100 نقطة")
-
-        method = state[uid]
+            return await m.answer("❌ لم تصل للحد الأدنى")
+        method = STATE[uid].replace("w_", "")
         create_withdraw(uid, u[1]*RATE, method, m.text)
-
-        state.pop(uid)
-
+        STATE.pop(uid)
         return await m.answer("✅ تم إرسال طلب السحب")
 
-    # ===== TRANSFER =====
-    if uid in state and state[uid] == "transfer":
+    # TRANSFER
+    if uid in STATE and STATE[uid] == "transfer":
         try:
             username, amount = m.text.split()
             amount = int(amount)
-
-            target = get_user_by_username(username.replace("@",""))
-
-            if not target:
-                return await m.answer("❌ المستخدم غير موجود")
-
-            if u[1] < amount:
-                return await m.answer("❌ رصيدك مش كفاية")
-
-            add_points(uid, -amount)
-            add_points(target[0], amount)
-
-            state.pop(uid)
-
-            return await m.answer("✅ تم التحويل")
-
+            # require username mapping externally if needed
+            return await m.answer("⚠️ ربط اليوزر يتطلب حفظ username في الداتابيز")
         except:
             return await m.answer("❌ الصيغة: @username 50")
 
-
-# ================= RUN =================
+# ===== RUN =====
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
