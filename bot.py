@@ -30,11 +30,12 @@ def menu(u):
     )
 
     kb.add(
-        InlineKeyboardButton("💸 Withdraw", callback_data="withdraw"),
-        InlineKeyboardButton("🔁 Transfer", callback_data="transfer")
+        InlineKeyboardButton("➕ Add Task", callback_data="add_task"),
+        InlineKeyboardButton("💸 Withdraw", callback_data="withdraw")
     )
 
     kb.add(
+        InlineKeyboardButton("🔁 Transfer", callback_data="transfer"),
         InlineKeyboardButton("👥 Referral", callback_data="ref")
     )
 
@@ -134,6 +135,13 @@ async def cb(c: types.CallbackQuery):
         for a in ads:
             await c.message.answer(f"📢 {a[2]}\n⏱ {a[3]}h")
 
+    # ADD TASK START
+    if c.data == "add_task":
+        STATE[uid] = "add_task"
+        return await c.message.answer(
+            "✍ Send task:\nTitle | Link | Reward | Budget"
+        )
+
     # WITHDRAW
     if c.data == "withdraw":
         STATE[uid] = "withdraw"
@@ -225,6 +233,27 @@ async def text(m: types.Message):
 
             STATE.pop(uid)
             return await m.answer("✅ Transfer done")
+
+        # ADD TASK
+        if STATE[uid] == "add_task":
+            title, link, reward, budget = m.text.split("|")
+
+            reward = int(reward)
+            budget = int(budget)
+
+            if u[2] < 20:
+                return await m.answer("❌ Need 20 points to post task")
+
+            add_points(uid, -20)
+
+            cur.execute("""
+                INSERT INTO tasks VALUES (NULL,?,?,?,?,?,?)
+            """, (uid, title, link, reward, budget, budget))
+            conn.commit()
+
+            STATE.pop(uid)
+
+            return await m.answer("✅ Task published")
 
     except:
         await m.answer("❌ Wrong format")
