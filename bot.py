@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import BOT_TOKEN, ADMIN_IDS
 from database import *
-from database import cur, conn  # ✅ إضافة مهمة
+from database import cur, conn  # مهم
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -40,8 +40,8 @@ def menu(u):
         InlineKeyboardButton("👥 Referral", callback_data="ref")
     )
 
-    # ✅ إصلاح الأدمن
-    if int(u[0]) in ADMIN_IDS:
+    # ✅ FIXED ADMIN CHECK (safe type)
+    if str(u[0]) in list(map(str, ADMIN_IDS)):
         kb.add(InlineKeyboardButton("🛠 Admin Panel", callback_data="admin"))
 
     return kb
@@ -217,7 +217,7 @@ async def text(m: types.Message):
             STATE.pop(uid)
             return await m.answer("✅ Withdraw sent")
 
-        # TRANSFER (✅ FIXED)
+        # TRANSFER
         if STATE[uid] == "transfer":
             username, amount = m.text.split()
             amount = int(amount)
